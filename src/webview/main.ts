@@ -28,6 +28,7 @@ const state: {
     fileChanges: FileChangeInfo[];
     rollbackPoint: number | null;
     availableModels: any[];
+    recentModels: { provider: string; id: string; name?: string }[];
     tabs: TabInfo[];
     activeTabId: string;
 } = {
@@ -40,6 +41,7 @@ const state: {
     thinkingStartTime: 0,
     streamingThinkingDuration: 0,
     availableModels: [],
+    recentModels: [],
     fileChanges: [],
     rollbackPoint: null,
     tabs: [],
@@ -94,10 +96,16 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'models':
             state.availableModels = msg.models ?? [];
-            if (msg.current) state.model = msg.current;
+            if (msg.current) {
+                state.model = msg.current;
+                addToRecentModels(msg.current.provider, msg.current.id, msg.current.name);
+            }
             if (msg.thinkingLevel) state.thinkingLevel = msg.thinkingLevel;
             updateFooterModel();
-            showModelPicker();
+            if (pendingModelPicker) {
+                pendingModelPicker = false;
+                showModelPicker();
+            }
             break;
         case 'sessions':
             renderSessionList(msg.sessions, msg.currentSessionId);
@@ -134,6 +142,7 @@ function handleConfirmResult(action: string, confirmed: boolean, payload?: any):
 }
 
 function applyStateSync(s: SerializedAgentState): void {
+    const prevTab = state.activeTabId;
     state.messages = s.messages ?? [];
     state.isStreaming = s.isStreaming;
     state.model = s.model;
@@ -151,7 +160,13 @@ function applyStateSync(s: SerializedAgentState): void {
     state.isThinking = s.isThinking ?? false;
     state.thinkingStartTime = s.thinkingStartTime ?? 0;
     state.streamingThinkingDuration = s.streamingThinkingDuration ?? 0;
+    const tabSwitched = prevTab !== state.activeTabId;
     render();
+    if (tabSwitched || !prevTab) {
+        userHasScrolled = false;
+        scrollToBottom(true);
+        updateScrollButton();
+    }
 }
 
 function handleAgentEvent(event: any): void {
@@ -166,6 +181,7 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            userHasScrolled = false;
             render();
             break;
         case 'agent_end':
@@ -269,7 +285,17 @@ function render(): void {
     streamingContainer.id = 'streaming-message';
     messagesContainer.appendChild(streamingContainer);
 
+    const spacer = el('div', 'messages-spacer');
+    messagesContainer.appendChild(spacer);
+
     app.appendChild(messagesContainer);
+
+    const scrollBtn = el('button', 'scroll-bottom-btn');
+    scrollBtn.id = 'btn-scroll-bottom';
+    scrollBtn.title = 'Scroll to bottom';
+    scrollBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3L8 13M8 13L3 8M8 13L13 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    app.appendChild(scrollBtn);
+
     app.appendChild(buildInputContainer());
 
     bindEvents();
@@ -280,6 +306,14 @@ function render(): void {
     bindDiffButtons();
     bindToolClickable();
     bindChangedFileItems();
+    bindScrollListener();
+
+    scrollBtn.addEventListener('click', () => {
+        userHasScrolled = false;
+        scrollToBottom(true);
+        updateScrollButton();
+    });
+
     scrollToBottom();
 }
 
@@ -970,19 +1004,47 @@ function buildThinkingBlock(text: string, active: boolean): HTMLElement {
 
 // ── Model picker popup ──
 
+let pendingModelPicker = false;
+
 function toggleModelPicker(): void {
     const existing = document.getElementById('model-picker');
     if (existing) {
         existing.remove();
+        pendingModelPicker = false;
         return;
     }
 
     if (state.availableModels.length === 0) {
+        pendingModelPicker = true;
         vscode.postMessage({ type: 'getModels' });
         return;
     }
 
     showModelPicker();
+}
+
+function addToRecentModels(provider: string, id: string, name?: string): void {
+    state.recentModels = state.recentModels.filter(
+        m => !(m.id === id && m.provider === provider)
+    );
+    state.recentModels.unshift({ provider, id, name });
+    if (state.recentModels.length > 5) {
+        state.recentModels = state.recentModels.slice(0, 5);
+    }
+}
+
+function buildModelItem(m: any): HTMLElement {
+    const item = el('div', 'model-item');
+    const isActive = state.model && m.id === state.model.id && m.provider === state.model.provider;
+    if (isActive) item.classList.add('active');
+    item.dataset.provider = m.provider;
+    item.dataset.modelId = m.id;
+    item.dataset.name = (m.name ?? m.id).toLowerCase();
+    item.innerHTML = `
+        <span class="model-item-check">${isActive ? '&#10003;' : ''}</span>
+        <span class="model-item-name">${escHtml(m.name ?? m.id)}</span>
+    `;
+    return item;
 }
 
 function showModelPicker(): void {
@@ -1002,32 +1064,44 @@ function showModelPicker(): void {
     picker.appendChild(searchInput);
 
     const list = el('div', 'model-list');
+
+    if (state.recentModels.length > 0) {
+        const recentHeader = el('div', 'model-section-header');
+        recentHeader.textContent = 'Recent';
+        list.appendChild(recentHeader);
+
+        for (const r of state.recentModels) {
+            const full = state.availableModels.find(
+                m => m.id === r.id && m.provider === r.provider
+            );
+            if (full) {
+                list.appendChild(buildModelItem(full));
+            }
+        }
+
+        const allHeader = el('div', 'model-section-header');
+        allHeader.textContent = 'All Models';
+        list.appendChild(allHeader);
+    }
+
     for (const m of state.availableModels) {
-        const item = el('div', 'model-item');
-        const isActive = state.model && m.id === state.model.id && m.provider === state.model.provider;
-        if (isActive) item.classList.add('active');
-        item.dataset.provider = m.provider;
-        item.dataset.modelId = m.id;
-        item.dataset.name = (m.name ?? m.id).toLowerCase();
-        item.innerHTML = `
-            <span class="model-item-check">${isActive ? '&#10003;' : ''}</span>
-            <span class="model-item-name">${escHtml(m.name ?? m.id)}</span>
-        `;
-        list.appendChild(item);
+        list.appendChild(buildModelItem(m));
     }
     picker.appendChild(list);
 
     const thinkingRow = el('div', 'thinking-chips');
+    const thinkingLabel = el('span', 'thinking-label');
+    thinkingLabel.textContent = 'Thinking:';
+    thinkingRow.appendChild(thinkingLabel);
     const levels = ['off', 'minimal', 'low', 'medium', 'high'];
     for (const level of levels) {
         const chip = el('button', `thinking-chip${level === state.thinkingLevel ? ' active' : ''}`);
-        chip.textContent = level;
+        chip.textContent = level.charAt(0).toUpperCase() + level.slice(1);
         chip.dataset.level = level;
         thinkingRow.appendChild(chip);
     }
     picker.appendChild(thinkingRow);
 
-    (container as HTMLElement).style.position = 'relative';
     container.appendChild(picker);
 
     searchInput.focus();
@@ -1037,6 +1111,9 @@ function showModelPicker(): void {
         list.querySelectorAll('.model-item').forEach((item) => {
             const name = (item as HTMLElement).dataset.name ?? '';
             (item as HTMLElement).style.display = name.includes(q) ? '' : 'none';
+        });
+        list.querySelectorAll('.model-section-header').forEach((hdr) => {
+            (hdr as HTMLElement).style.display = q ? 'none' : '';
         });
     });
 
@@ -1049,6 +1126,7 @@ function showModelPicker(): void {
         const matched = state.availableModels.find(m => m.id === modelId && m.provider === provider);
         if (matched) {
             state.model = { provider, id: modelId, name: matched.name ?? modelId };
+            addToRecentModels(provider, modelId, matched.name ?? modelId);
         }
         updateFooterModel();
         closeModelPicker();
@@ -1331,6 +1409,8 @@ function sendMessage(): void {
     if (!text) return;
     input.value = '';
     input.style.height = 'auto';
+    userHasScrolled = false;
+    updateScrollButton();
     vscode.postMessage({ type: 'prompt', text });
 }
 
@@ -1400,11 +1480,62 @@ function tryParseJSON(s: string): any {
     try { return JSON.parse(s); } catch { return s; }
 }
 
-function scrollToBottom(): void {
+let userHasScrolled = false;
+let isProgrammaticScroll = false;
+
+function scrollToBottom(force = false): void {
+    if (userHasScrolled && !force) return;
     const messages = document.getElementById('messages');
     if (messages) {
+        isProgrammaticScroll = true;
         messages.scrollTop = messages.scrollHeight;
     }
+}
+
+function isNearBottom(): boolean {
+    const messages = document.getElementById('messages');
+    if (!messages) return true;
+    return messages.scrollHeight - messages.scrollTop - messages.clientHeight < 50;
+}
+
+function updateScrollButton(): void {
+    const btn = document.getElementById('btn-scroll-bottom');
+    if (!btn) return;
+    if (userHasScrolled) {
+        btn.classList.add('visible');
+    } else {
+        btn.classList.remove('visible');
+    }
+}
+
+function bindScrollListener(): void {
+    const messages = document.getElementById('messages');
+    if (!messages) return;
+
+    // Detect user-initiated scroll intent immediately
+    messages.addEventListener('wheel', (e) => {
+        if (e.deltaY < 0) {
+            userHasScrolled = true;
+            updateScrollButton();
+        }
+    }, { passive: true });
+
+    messages.addEventListener('touchstart', () => {
+        userHasScrolled = true;
+        updateScrollButton();
+    }, { passive: true });
+
+    // The scroll event handles resetting when user reaches bottom
+    messages.addEventListener('scroll', () => {
+        if (isProgrammaticScroll) {
+            isProgrammaticScroll = false;
+            return;
+        }
+        if (isNearBottom()) {
+            userHasScrolled = false;
+        }
+        updateScrollButton();
+    });
 }
 
 // ── Init ──

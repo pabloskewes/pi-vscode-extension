@@ -197,6 +197,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             ) {
                 this.sendStateSync();
             }
+        } else if (event.type === 'agent_start' || event.type === 'agent_end') {
+            this.sendStateSync();
         }
     }
 
