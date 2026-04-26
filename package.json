@@ -1,0 +1,122 @@
+{
+  "name": "pi-agent",
+  "displayName": "Pi Agent",
+  "description": "First-class Pi coding agent experience for VS Code",
+  "version": "0.1.0",
+  "publisher": "zetaphor",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi-agent",
+          "title": "Pi Agent",
+          "icon": "media/pi-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "pi-agent": [
+        {
+          "type": "webview",
+          "id": "pi-agent.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "pi-agent.newChat",
+        "title": "Pi: New Chat"
+      },
+      {
+        "command": "pi-agent.abort",
+        "title": "Pi: Stop Generation"
+      },
+      {
+        "command": "pi-agent.selectModel",
+        "title": "Pi: Select Model"
+      },
+      {
+        "command": "pi-agent.toggleThinking",
+        "title": "Pi: Toggle Thinking Level"
+      },
+      {
+        "command": "pi-agent.focusChat",
+        "title": "Pi: Focus Chat"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "pi-agent.focusChat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "pi-agent.newChat",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n"
+      },
+      {
+        "command": "pi-agent.abort",
+        "key": "escape",
+        "when": "pi-agent.isStreaming"
+      }
+    ],
+    "configuration": {
+      "title": "Pi Agent",
+      "properties": {
+        "pi-agent.thinkingLevel": {
+          "type": "string",
+          "default": "off",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Default thinking level for Pi agent responses"
+        },
+        "pi-agent.autoApproveTools": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically approve tool executions without confirmation"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "npx @vscode/vsce package",
+    "test": "vitest",
+    "test:unit": "vitest run",
+    "test:integration": "node out/test/integration/runTest.js",
+    "test:all": "npm run test:unit && npm run test:integration"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.70.2",
+    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "marked": "^18.0.2"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.0",
+    "mocha": "^11.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

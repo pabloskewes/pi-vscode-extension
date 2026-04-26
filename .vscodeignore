@@ -1,0 +1,10 @@
+.vscode/**
+.vscode-test/**
+src/**
+node_modules/**
+!node_modules/@mariozechner/**
+.gitignore
+vitest.config.ts
+tsconfig.json
+esbuild.js
+*.map
