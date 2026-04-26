@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -27,6 +27,9 @@ const state: {
     contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
     fileChanges: FileChangeInfo[];
     rollbackPoint: number | null;
+    availableModels: any[];
+    tabs: TabInfo[];
+    activeTabId: string;
 } = {
     messages: [],
     isStreaming: false,
@@ -36,8 +39,11 @@ const state: {
     isThinking: false,
     thinkingStartTime: 0,
     streamingThinkingDuration: 0,
+    availableModels: [],
     fileChanges: [],
     rollbackPoint: null,
+    tabs: [],
+    activeTabId: '',
 };
 
 // ── Marked config ──
@@ -79,7 +85,6 @@ function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
         case 'ready':
             vscode.postMessage({ type: 'getState' });
-            vscode.postMessage({ type: 'getModels' });
             break;
         case 'stateSync':
             applyStateSync(msg.state);
@@ -88,7 +93,11 @@ function handleMessage(msg: ServerMessage): void {
             handleAgentEvent(msg.event);
             break;
         case 'models':
-            renderModelPicker(msg.models, msg.current, msg.thinkingLevel);
+            state.availableModels = msg.models ?? [];
+            if (msg.current) state.model = msg.current;
+            if (msg.thinkingLevel) state.thinkingLevel = msg.thinkingLevel;
+            updateFooterModel();
+            showModelPicker();
             break;
         case 'sessions':
             renderSessionList(msg.sessions, msg.currentSessionId);
@@ -135,6 +144,13 @@ function applyStateSync(s: SerializedAgentState): void {
     state.contextUsage = s.contextUsage;
     state.fileChanges = s.fileChanges ?? [];
     state.rollbackPoint = s.rollbackPoint ?? null;
+    state.tabs = s.tabs ?? [];
+    state.activeTabId = s.activeTabId ?? '';
+    state.streamingText = s.streamingText ?? '';
+    state.streamingThinking = s.streamingThinking ?? '';
+    state.isThinking = s.isThinking ?? false;
+    state.thinkingStartTime = s.thinkingStartTime ?? 0;
+    state.streamingThinkingDuration = s.streamingThinkingDuration ?? 0;
     render();
 }
 
@@ -206,7 +222,6 @@ function render(): void {
     app.innerHTML = '';
 
     app.appendChild(buildHeader());
-    app.appendChild(buildModelBar());
 
     const messagesContainer = el('div', 'messages');
     messagesContainer.id = 'messages';
@@ -258,6 +273,7 @@ function render(): void {
     app.appendChild(buildInputContainer());
 
     bindEvents();
+    bindTabEvents();
     bindCopyButtons();
     bindCheckpointButtons();
     bindRedoButtons();
@@ -269,27 +285,49 @@ function render(): void {
 
 function buildHeader(): HTMLElement {
     const header = el('div', 'header');
-    const usageText = state.contextUsage?.percent != null
-        ? `${Math.round(state.contextUsage.percent)}%`
-        : '';
 
-    header.innerHTML = `
-        <div class="header-left">
-            <span class="session-name">${escHtml(state.sessionName ?? 'New Chat')}</span>
-            ${usageText ? `<span class="context-badge" title="Context window usage">${usageText}</span>` : ''}
-        </div>
-        <div class="header-right">
-            <button class="icon-btn" id="btn-sessions" title="Sessions">&#9776;</button>
-            <button class="icon-btn" id="btn-new-session" title="New Chat">+</button>
-        </div>
+    const tabStrip = el('div', 'tab-strip');
+    for (const tab of state.tabs) {
+        const tabEl = el('div', `tab${tab.isActive ? ' tab-active' : ''}${tab.isStreaming ? ' tab-streaming' : ''}`);
+        tabEl.dataset.tabId = tab.id;
+
+        const icon = el('span', 'tab-icon');
+        if (tab.isStreaming) {
+            icon.innerHTML = '<span class="tab-spinner"></span>';
+        } else {
+            icon.innerHTML = '&#128488;';
+        }
+
+        const name = el('span', 'tab-name');
+        const displayName = tab.name.length > 20
+            ? tab.name.substring(0, 18) + '...'
+            : tab.name;
+        name.textContent = displayName;
+        name.title = tab.name;
+
+        tabEl.appendChild(icon);
+        tabEl.appendChild(name);
+
+        if (state.tabs.length > 1) {
+            const closeBtn = el('button', 'tab-close');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.title = 'Close tab';
+            closeBtn.dataset.tabId = tab.id;
+            tabEl.appendChild(closeBtn);
+        }
+
+        tabStrip.appendChild(tabEl);
+    }
+    header.appendChild(tabStrip);
+
+    const headerActions = el('div', 'header-right');
+    headerActions.innerHTML = `
+        <button class="icon-btn" id="btn-new-tab" title="New Agent">+</button>
+        <button class="icon-btn" id="btn-sessions" title="Sessions">&#9776;</button>
     `;
-    return header;
-}
+    header.appendChild(headerActions);
 
-function buildModelBar(): HTMLElement {
-    const bar = el('div', 'model-bar');
-    bar.id = 'model-bar';
-    return bar;
+    return header;
 }
 
 function buildInputContainer(): HTMLElement {
@@ -930,30 +968,123 @@ function buildThinkingBlock(text: string, active: boolean): HTMLElement {
     return details;
 }
 
-// ── Model picker ──
+// ── Model picker popup ──
 
-function renderModelPicker(models: any[], current?: any, thinkingLevel?: string): void {
-    const bar = document.getElementById('model-bar');
-    if (!bar) return;
+function toggleModelPicker(): void {
+    const existing = document.getElementById('model-picker');
+    if (existing) {
+        existing.remove();
+        return;
+    }
 
-    bar.innerHTML = `
-        <select id="model-select" title="Select model">
-            ${models.map(m => `<option value="${escHtml(m.provider)}:${escHtml(m.id)}" ${current && m.id === current.id && m.provider === current.provider ? 'selected' : ''}>${escHtml(m.name ?? m.id)}</option>`).join('')}
-        </select>
-        <select id="thinking-select" title="Thinking level">
-            ${['off', 'minimal', 'low', 'medium', 'high'].map(l => `<option value="${l}" ${l === thinkingLevel ? 'selected' : ''}>${l}</option>`).join('')}
-        </select>
-    `;
+    if (state.availableModels.length === 0) {
+        vscode.postMessage({ type: 'getModels' });
+        return;
+    }
 
-    document.getElementById('model-select')?.addEventListener('change', (e) => {
-        const val = (e.target as HTMLSelectElement).value;
-        const [provider, ...rest] = val.split(':');
-        vscode.postMessage({ type: 'setModel', provider, modelId: rest.join(':') });
+    showModelPicker();
+}
+
+function showModelPicker(): void {
+    const existing = document.getElementById('model-picker');
+    if (existing) existing.remove();
+
+    const container = document.querySelector('.input-container');
+    if (!container) return;
+
+    const picker = el('div', 'model-picker');
+    picker.id = 'model-picker';
+
+    const searchInput = document.createElement('input');
+    searchInput.className = 'model-search';
+    searchInput.placeholder = 'Search models...';
+    searchInput.type = 'text';
+    picker.appendChild(searchInput);
+
+    const list = el('div', 'model-list');
+    for (const m of state.availableModels) {
+        const item = el('div', 'model-item');
+        const isActive = state.model && m.id === state.model.id && m.provider === state.model.provider;
+        if (isActive) item.classList.add('active');
+        item.dataset.provider = m.provider;
+        item.dataset.modelId = m.id;
+        item.dataset.name = (m.name ?? m.id).toLowerCase();
+        item.innerHTML = `
+            <span class="model-item-check">${isActive ? '&#10003;' : ''}</span>
+            <span class="model-item-name">${escHtml(m.name ?? m.id)}</span>
+        `;
+        list.appendChild(item);
+    }
+    picker.appendChild(list);
+
+    const thinkingRow = el('div', 'thinking-chips');
+    const levels = ['off', 'minimal', 'low', 'medium', 'high'];
+    for (const level of levels) {
+        const chip = el('button', `thinking-chip${level === state.thinkingLevel ? ' active' : ''}`);
+        chip.textContent = level;
+        chip.dataset.level = level;
+        thinkingRow.appendChild(chip);
+    }
+    picker.appendChild(thinkingRow);
+
+    (container as HTMLElement).style.position = 'relative';
+    container.appendChild(picker);
+
+    searchInput.focus();
+
+    searchInput.addEventListener('input', () => {
+        const q = searchInput.value.toLowerCase();
+        list.querySelectorAll('.model-item').forEach((item) => {
+            const name = (item as HTMLElement).dataset.name ?? '';
+            (item as HTMLElement).style.display = name.includes(q) ? '' : 'none';
+        });
     });
 
-    document.getElementById('thinking-select')?.addEventListener('change', (e) => {
-        vscode.postMessage({ type: 'setThinkingLevel', level: (e.target as HTMLSelectElement).value });
+    list.addEventListener('click', (e) => {
+        const item = (e.target as HTMLElement).closest('.model-item') as HTMLElement | null;
+        if (!item) return;
+        const provider = item.dataset.provider!;
+        const modelId = item.dataset.modelId!;
+        vscode.postMessage({ type: 'setModel', provider, modelId });
+        const matched = state.availableModels.find(m => m.id === modelId && m.provider === provider);
+        if (matched) {
+            state.model = { provider, id: modelId, name: matched.name ?? modelId };
+        }
+        updateFooterModel();
+        closeModelPicker();
     });
+
+    thinkingRow.addEventListener('click', (e) => {
+        const chip = (e.target as HTMLElement).closest('.thinking-chip') as HTMLElement | null;
+        if (!chip) return;
+        vscode.postMessage({ type: 'setThinkingLevel', level: chip.dataset.level! });
+        thinkingRow.querySelectorAll('.thinking-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.thinkingLevel = chip.dataset.level;
+    });
+
+    setTimeout(() => {
+        document.addEventListener('click', onClickOutsidePicker);
+    }, 0);
+}
+
+function onClickOutsidePicker(e: MouseEvent): void {
+    const picker = document.getElementById('model-picker');
+    if (picker && !picker.contains(e.target as Node)) {
+        closeModelPicker();
+    }
+}
+
+function closeModelPicker(): void {
+    document.getElementById('model-picker')?.remove();
+    document.removeEventListener('click', onClickOutsidePicker);
+}
+
+function updateFooterModel(): void {
+    const el = document.querySelector('.footer-model');
+    if (el) {
+        el.textContent = state.model?.name ?? state.model?.id ?? '';
+    }
 }
 
 // ── Session list ──
@@ -1016,7 +1147,7 @@ function showError(message: string): void {
 function bindEvents(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     const sendBtn = document.getElementById('btn-send');
-    const newBtn = document.getElementById('btn-new-session');
+    const newTabBtn = document.getElementById('btn-new-tab');
     const abortBtn = document.getElementById('btn-abort');
     const sessionsBtn = document.getElementById('btn-sessions');
     const undoAllBtn = document.getElementById('btn-undo-all');
@@ -1062,9 +1193,14 @@ function bindEvents(): void {
         input.style.height = Math.min(input.scrollHeight, 200) + 'px';
     });
 
-    newBtn?.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
+    newTabBtn?.addEventListener('click', () => vscode.postMessage({ type: 'createTab' }));
     sessionsBtn?.addEventListener('click', () => vscode.postMessage({ type: 'getSessions' }));
     abortBtn?.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
+
+    document.querySelector('.footer-model')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleModelPicker();
+    });
 
     undoAllBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1086,6 +1222,29 @@ function bindEvents(): void {
                 vscode.postMessage({ type: 'openDiff', filePath: change.filePath, toolCallId: change.toolCallId });
             }
         }
+    });
+}
+
+function bindTabEvents(): void {
+    document.querySelectorAll('.tab').forEach((tabEl) => {
+        tabEl.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest('.tab-close')) return;
+            const tabId = (tabEl as HTMLElement).dataset.tabId;
+            if (tabId && tabId !== state.activeTabId) {
+                vscode.postMessage({ type: 'switchTab', tabId });
+            }
+        });
+    });
+
+    document.querySelectorAll('.tab-close').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabId = (btn as HTMLElement).dataset.tabId;
+            if (tabId) {
+                vscode.postMessage({ type: 'closeTab', tabId });
+            }
+        });
     });
 }
 

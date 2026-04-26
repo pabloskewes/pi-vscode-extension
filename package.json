@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi-agent.chat",
-          "name": "Chat"
+          "name": "Pi Agent"
         }
       ]
     },
