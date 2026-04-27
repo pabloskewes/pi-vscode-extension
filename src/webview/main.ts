@@ -127,9 +127,6 @@ function handleMessage(msg: ServerMessage): void {
 function handleConfirmResult(action: string, confirmed: boolean, payload?: any): void {
     if (!confirmed) return;
     switch (action) {
-        case 'undoAllFileChanges':
-            vscode.postMessage({ type: 'undoAllFileChanges' });
-            break;
         case 'restoreCheckpoint':
             if (payload?.messageIndex !== undefined) {
                 vscode.postMessage({ type: 'restoreCheckpoint', messageIndex: payload.messageIndex });
@@ -520,11 +517,14 @@ function buildChangedFilesSection(): HTMLElement {
 
     const summary = document.createElement('summary');
     summary.className = 'changed-files-summary';
+    const undoRedoBtn = state.rollbackPoint !== null
+        ? `<button class="changed-files-link" id="btn-redo" title="Redo changes">Redo</button>`
+        : `<button class="changed-files-link" id="btn-undo" title="Undo last change">Undo</button>`;
     summary.innerHTML = `
         <span class="changed-files-arrow">&#9656;</span>
         <span class="changed-files-count">${count} File${count !== 1 ? 's' : ''}</span>
         <span class="changed-files-spacer"></span>
-        <button class="changed-files-link" id="btn-undo-all" title="Undo all">Undo All</button>
+        ${undoRedoBtn}
         <button class="changed-files-review-btn" id="btn-review-all" title="Review all changes">Review</button>
     `;
     details.appendChild(summary);
@@ -577,14 +577,31 @@ function updateChangedFiles(): void {
 
     bindChangedFileItems();
 
-    const undoAllBtn = document.getElementById('btn-undo-all');
-    undoAllBtn?.addEventListener('click', (e) => {
+    const undoBtn = document.getElementById('btn-undo');
+    undoBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        let lastUserTurn = 0;
+        for (const msg of state.messages) {
+            if ((msg.role ?? 'unknown') === 'user') lastUserTurn++;
+        }
+        if (lastUserTurn < 1) return;
+        vscode.postMessage({
+            type: 'confirmAction',
+            action: 'restoreCheckpoint',
+            message: 'Undo changes from the last turn?',
+            payload: { messageIndex: lastUserTurn - 1 },
+        });
+    });
+
+    const redoBtn = document.getElementById('btn-redo');
+    redoBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
         vscode.postMessage({
             type: 'confirmAction',
-            action: 'undoAllFileChanges',
-            message: 'Undo all file changes made in this session?',
+            action: 'redoCheckpoint',
+            message: 'Re-apply the rolled-back changes?',
         });
     });
 

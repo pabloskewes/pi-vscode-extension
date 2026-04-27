@@ -75,7 +75,6 @@ export type ClientMessage =
     | { type: 'openFile'; filePath: string }
     | { type: 'openDiff'; filePath: string; toolCallId: string }
     | { type: 'undoFileChange'; filePath: string; toolCallId: string }
-    | { type: 'undoAllFileChanges' }
     | { type: 'restoreCheckpoint'; messageIndex: number }
     | { type: 'redoCheckpoint' }
     | { type: 'confirmAction'; action: string; message: string; payload?: any }

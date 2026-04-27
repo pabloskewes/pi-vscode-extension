@@ -190,20 +190,6 @@ export class DiffManager implements vscode.Disposable {
         this._originalContents.delete(absPath);
     }
 
-    async undoAllFileChanges(): Promise<void> {
-        for (const [absPath, original] of this._originalContents) {
-            try {
-                if (original === null) {
-                    if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
-                } else {
-                    fs.writeFileSync(absPath, original, 'utf-8');
-                }
-            } catch { /* best effort */ }
-        }
-        this._fileChanges = [];
-        this._originalContents.clear();
-    }
-
     private _suspendedChanges: FileChangeInfo[] = [];
     private _suspendedOriginals = new Map<string, string | null>();
 

@@ -384,10 +384,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await tab.diffManager.undoFileChange(msg.filePath, msg.toolCallId);
                     this.sendStateSync();
                     break;
-                case 'undoAllFileChanges':
-                    await tab.diffManager.undoAllFileChanges();
-                    this.sendStateSync();
-                    break;
                 case 'restoreCheckpoint': {
                     const restored = await tab.checkpointManager.restoreCheckpoint(msg.messageIndex);
                     tab.diffManager.suspendChangesAfter(msg.messageIndex);
