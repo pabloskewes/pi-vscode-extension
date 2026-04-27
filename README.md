@@ -28,11 +28,63 @@ Pick from any model available through the Pi agent's model registry via a quick-
 ### Context Usage
 Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip.
 
-## Requirements
+## Prerequisites
 
-- **VS Code** `1.100.0` or later (or a compatible fork such as Cursor)
-- **Node.js** `18+`
-- A valid API key for at least one supported AI provider, configured through [Pi's auth system](https://www.npmjs.com/package/@mariozechner/pi-coding-agent)
+This extension embeds the [Pi coding agent](https://github.com/badlogic/pi-mono) SDK as an npm dependency. You do **not** need to install Pi separately, but you do need the following on your system before building or running the extension.
+
+### 1. Node.js 18+
+
+Install Node.js `18` or later. Any of the following will work:
+
+- [Official installer](https://nodejs.org/)
+- A version manager such as [nvm](https://github.com/nvm-sh/nvm), [fnm](https://github.com/Schniz/fnm), or [mise](https://mise.jdx.dev/)
+
+Verify with:
+
+```bash
+node --version   # v18.x or later
+npm --version
+```
+
+### 2. VS Code 1.100.0+
+
+Install [VS Code](https://code.visualstudio.com/) `1.100.0` or later. Compatible forks such as [Cursor](https://www.cursor.com/) also work.
+
+### 3. AI Provider Credentials
+
+The Pi agent needs credentials for at least one AI provider. You can authenticate in two ways:
+
+**Option A — Environment variable (API key):**
+
+Set the appropriate environment variable before launching VS Code:
+
+```bash
+# Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+
+# Google Gemini
+export GEMINI_API_KEY=...
+
+# DeepSeek
+export DEEPSEEK_API_KEY=...
+```
+
+Other supported API-key providers include Azure OpenAI, Google Vertex, Amazon Bedrock, Mistral, Groq, Cerebras, xAI, OpenRouter, Vercel AI Gateway, Hugging Face, Fireworks, Kimi For Coding, and MiniMax. See [Pi's provider docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md) for the full list and variable names.
+
+**Option B — Subscription login:**
+
+If you have an Anthropic Claude Pro/Max, OpenAI ChatGPT Plus/Pro, GitHub Copilot, Google Gemini CLI, or Google Antigravity subscription, you can authenticate via Pi's OAuth flow. Install Pi globally and run the login command once:
+
+```bash
+npm install -g @mariozechner/pi-coding-agent
+pi
+/login   # select your provider and complete the browser flow
+```
+
+The token is stored in `~/.pi/agent/` and the extension will pick it up automatically.
 
 ## Installation
 
