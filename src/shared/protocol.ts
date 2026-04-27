@@ -20,6 +20,7 @@ export interface TabInfo {
     name: string;
     isActive: boolean;
     isStreaming: boolean;
+    hasNotification: boolean;
 }
 
 export interface SerializedAgentState {

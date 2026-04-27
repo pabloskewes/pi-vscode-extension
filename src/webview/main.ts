@@ -8,6 +8,7 @@ declare function acquireVsCodeApi(): {
 };
 
 const vscode = acquireVsCodeApi();
+const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
 
 // ── State ──
 
@@ -383,8 +384,10 @@ function updateTabs(): void {
         const icon = el('span', 'tab-icon');
         if (tab.isStreaming) {
             icon.innerHTML = '<span class="tab-spinner"></span>';
+        } else if (tab.hasNotification) {
+            icon.innerHTML = `<img class="tab-icon-img" src="${iconsBaseUri}/notification.png" alt="notification">`;
         } else {
-            icon.innerHTML = '&#128488;';
+            icon.innerHTML = `<img class="tab-icon-img" src="${iconsBaseUri}/chat.png" alt="chat">`;
         }
 
         const name = el('span', 'tab-name');
@@ -900,8 +903,6 @@ function renderStreamingContent(): void {
 }
 
 // ── Tool rendering ──
-
-const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
 
 function getToolIcon(name: string): string {
     const iconFiles: Record<string, string> = {

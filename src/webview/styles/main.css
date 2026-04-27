@@ -107,6 +107,12 @@ body {
 .tab-active .tab-icon { opacity: 1; }
 .tab-streaming .tab-icon { opacity: 1; }
 
+.tab-icon-img {
+    width: 14px;
+    height: 14px;
+    filter: brightness(0) invert(0.8);
+}
+
 .tab-spinner {
     display: inline-block;
     width: 10px;

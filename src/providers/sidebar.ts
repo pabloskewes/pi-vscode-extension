@@ -24,6 +24,7 @@ interface TabState {
     streamingThinkingDuration: number;
     agentStartTime: number;
     messageMeta: Map<number, MessageMeta>;
+    hasNotification: boolean;
 }
 
 let tabIdCounter = 0;
@@ -52,6 +53,7 @@ function makeTabState(
         streamingThinkingDuration: 0,
         agentStartTime: 0,
         messageMeta: new Map(),
+        hasNotification: false,
     };
 }
 
@@ -185,6 +187,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             tab.agentStartTime = 0;
             if (isActive) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
+            } else {
+                tab.hasNotification = true;
             }
         }
 
@@ -279,6 +283,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             name: tab.name,
             isActive: id === this._activeTabId,
             isStreaming: tab.session.session?.isStreaming ?? false,
+            hasNotification: tab.hasNotification,
         }));
     }
 
@@ -493,6 +498,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._activeTabId = tabId;
 
         const tab = this._activeTab;
+        tab.hasNotification = false;
         if (tab.session.session?.isStreaming) {
             vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
         } else {
