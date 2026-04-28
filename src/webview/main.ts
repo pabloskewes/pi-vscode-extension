@@ -272,8 +272,8 @@ function render(): void {
     header.appendChild(tabStrip);
     const headerActions = el('div', 'header-right');
     headerActions.innerHTML = `
-        <button class="icon-btn" id="btn-new-tab" title="New Agent">+</button>
-        <button class="icon-btn" id="btn-sessions" title="Sessions">&#9776;</button>
+        <button class="icon-btn" id="btn-new-tab" title="New Agent"><img class="header-icon-img" src="${iconsBaseUri}/new.png" alt="new"></button>
+        <button class="icon-btn" id="btn-sessions" title="Sessions"><img class="header-icon-img" src="${iconsBaseUri}/list.png" alt="sessions"></button>
         <button class="icon-btn" id="btn-settings" title="Settings"><img class="header-icon-img" src="${iconsBaseUri}/settings.png" alt="settings"></button>
     `;
     header.appendChild(headerActions);
