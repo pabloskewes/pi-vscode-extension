@@ -4,6 +4,26 @@ export interface ContextUsageInfo {
     percent: number | null;
 }
 
+export interface SettingsData {
+    apiProvider: string;
+    apiBaseUrl: string;
+    apiKeySet: boolean;
+    authMethod: 'env' | 'pi-login' | 'manual' | 'none';
+    defaultModel: string;
+    thinkingLevel: string;
+    autoApproveTools: boolean;
+    allowedTools: string[];
+    autoSaveSessions: boolean;
+    sessionStoragePath: string;
+    contextUsageWarningThreshold: number;
+}
+
+export interface ToolCallPendingInfo {
+    toolCallId: string;
+    toolName: string;
+    args: any;
+}
+
 export interface FileChangeInfo {
     filePath: string;
     toolCallId: string;
@@ -81,7 +101,15 @@ export type ClientMessage =
     | { type: 'confirmAction'; action: string; message: string; payload?: any }
     | { type: 'createTab' }
     | { type: 'closeTab'; tabId: string }
-    | { type: 'switchTab'; tabId: string };
+    | { type: 'switchTab'; tabId: string }
+    | { type: 'openSettings' };
+
+// Settings webview -> Extension messages
+export type SettingsClientMessage =
+    | { type: 'getSettings' }
+    | { type: 'updateSetting'; key: string; value: any }
+    | { type: 'setApiKey'; provider: string; key: string }
+    | { type: 'clearApiKey'; provider: string };
 
 // Extension -> Webview messages
 export type ServerMessage =
@@ -94,4 +122,12 @@ export type ServerMessage =
     | { type: 'sessionChanged'; sessionId: string }
     | { type: 'fileChange'; change: FileChangeInfo }
     | { type: 'confirmResult'; action: string; confirmed: boolean; payload?: any }
+    | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
+    | { type: 'toolCallResolved'; toolCallId: string }
+    | { type: 'error'; message: string };
+
+// Extension -> Settings webview messages
+export type SettingsServerMessage =
+    | { type: 'settings'; data: SettingsData }
+    | { type: 'settingChanged'; key: string; value: any }
     | { type: 'error'; message: string };

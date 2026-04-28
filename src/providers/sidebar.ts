@@ -9,6 +9,10 @@ interface MessageMeta {
     messageEndTime: number;
 }
 
+interface PendingApproval {
+    resolve: (approved: boolean) => void;
+}
+
 interface TabState {
     id: string;
     name: string;
@@ -25,6 +29,7 @@ interface TabState {
     agentStartTime: number;
     messageMeta: Map<number, MessageMeta>;
     hasNotification: boolean;
+    pendingApprovals: Map<string, PendingApproval>;
 }
 
 let tabIdCounter = 0;
@@ -54,6 +59,7 @@ function makeTabState(
         agentStartTime: 0,
         messageMeta: new Map(),
         hasNotification: false,
+        pendingApprovals: new Map(),
     };
 }
 
@@ -132,6 +138,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
             }),
         );
+
+        tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
+            return this._requestToolApproval(tab, toolCallId, toolName, args);
+        });
 
         this._tabSubscriptions.set(tab.id, unsubs);
     }
@@ -374,6 +384,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'getState':
                     this.sendStateSync();
                     break;
+                case 'approveToolCall':
+                    this._resolveToolApproval(tab, msg.toolCallId, true);
+                    break;
+                case 'rejectToolCall':
+                    this._resolveToolApproval(tab, msg.toolCallId, false);
+                    break;
                 case 'openFile': {
                     const fileUri = vscode.Uri.file(msg.filePath);
                     try {
@@ -449,9 +465,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'switchTab':
                     this._switchTab(msg.tabId);
                     break;
+                case 'openSettings':
+                    vscode.commands.executeCommand('pi-agent.openSettings');
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
+        }
+    }
+
+    private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            tab.pendingApprovals.set(toolCallId, { resolve });
+
+            if (tab.id === this._activeTabId) {
+                this._post({
+                    type: 'toolCallPending',
+                    pending: { toolCallId, toolName, args: safeSerialize(args) },
+                });
+            }
+        });
+    }
+
+    private _resolveToolApproval(tab: TabState, toolCallId: string, approved: boolean): void {
+        const pending = tab.pendingApprovals.get(toolCallId);
+        if (pending) {
+            tab.pendingApprovals.delete(toolCallId);
+            pending.resolve(approved);
+            if (tab.id === this._activeTabId) {
+                this._post({ type: 'toolCallResolved', toolCallId });
+            }
         }
     }
 

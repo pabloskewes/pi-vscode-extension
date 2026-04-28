@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { PiSessionManager } from './pi/session';
 import { SidebarProvider } from './providers/sidebar';
 import { StatusBarManager } from './providers/status-bar';
+import { SettingsPanel } from './providers/settings-panel';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
@@ -58,6 +59,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
             vscode.commands.registerCommand('pi-agent.focusChat', () => {
                 vscode.commands.executeCommand('pi-agent.chat.focus');
+            }),
+
+            vscode.commands.registerCommand('pi-agent.openSettings', () => {
+                SettingsPanel.show(context.extensionUri, context.secrets);
             }),
         );
 

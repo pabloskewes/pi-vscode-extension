@@ -26,15 +26,28 @@ const webviewConfig = {
     minify: false,
 };
 
+const settingsWebviewConfig = {
+    entryPoints: ['src/webview/settings.ts'],
+    bundle: true,
+    outfile: 'out/webview/settings.js',
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    sourcemap: true,
+    minify: false,
+};
+
 async function build() {
     if (isWatch) {
         const extCtx = await esbuild.context(extensionConfig);
         const webCtx = await esbuild.context(webviewConfig);
-        await Promise.all([extCtx.watch(), webCtx.watch()]);
+        const settingsCtx = await esbuild.context(settingsWebviewConfig);
+        await Promise.all([extCtx.watch(), webCtx.watch(), settingsCtx.watch()]);
         console.log('Watching for changes...');
     } else {
         await esbuild.build(extensionConfig);
         await esbuild.build(webviewConfig);
+        await esbuild.build(settingsWebviewConfig);
         console.log('Build complete.');
     }
 }

@@ -5,12 +5,15 @@ import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
 
+export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
+
 export class PiSessionManager {
     private _session: AgentSession | undefined;
     private _sessionManager: SessionManager | undefined;
     private _modelRegistry: ModelRegistry | undefined;
     private _unsubscribe: (() => void) | undefined;
     private _outputChannel: vscode.OutputChannel;
+    private _toolApprovalHandler: ToolApprovalHandler | undefined;
     readonly events = new EventRouter();
 
     constructor(outputChannel: vscode.OutputChannel) {
@@ -35,12 +38,20 @@ export class PiSessionManager {
 
         this._sessionManager = SM.create(cwd);
 
-        const { session, modelFallbackMessage } = await createAgentSession({
+        const config = vscode.workspace.getConfiguration('pi-agent');
+        const allowedTools = config.get<string[]>('allowedTools', []);
+
+        const opts: any = {
             cwd,
             authStorage,
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
-        });
+        };
+        if (allowedTools.length > 0) {
+            opts.allowedToolNames = allowedTools;
+        }
+
+        const { session, modelFallbackMessage } = await createAgentSession(opts);
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
@@ -49,10 +60,36 @@ export class PiSessionManager {
             this._outputChannel.appendLine(`Model fallback: ${modelFallbackMessage}`);
         }
 
+        this._applyDefaultSettings(session);
+        this._installToolApprovalHook(session);
+
         const model = session.model;
         this._outputChannel.appendLine(
             `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
         );
+    }
+
+    private _applyDefaultSettings(session: AgentSession): void {
+        const config = vscode.workspace.getConfiguration('pi-agent');
+
+        const thinkingLevel = config.get<string>('thinkingLevel', 'off');
+        if (thinkingLevel && thinkingLevel !== 'off') {
+            session.setThinkingLevel(thinkingLevel as any);
+        }
+
+        const defaultModel = config.get<string>('defaultModel', '');
+        if (defaultModel && this._modelRegistry) {
+            const available = getAvailableModels(this._modelRegistry);
+            const match = available.find(m => m.id === defaultModel);
+            if (match) {
+                const model = findModel(this._modelRegistry, match.provider, match.id);
+                if (model) {
+                    session.setModel(model).catch((err: any) => {
+                        this._outputChannel.appendLine(`Failed to set default model: ${err.message}`);
+                    });
+                }
+            }
+        }
     }
 
     async prompt(text: string): Promise<void> {
@@ -106,15 +143,25 @@ export class PiSessionManager {
         const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         this._sessionManager = SM.create(cwd);
 
-        const { session } = await createAgentSession({
+        const config = vscode.workspace.getConfiguration('pi-agent');
+        const allowedTools = config.get<string[]>('allowedTools', []);
+
+        const opts: any = {
             cwd,
             authStorage: await getAuthStorage(),
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
-        });
+        };
+        if (allowedTools.length > 0) {
+            opts.allowedToolNames = allowedTools;
+        }
+
+        const { session } = await createAgentSession(opts);
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        this._applyDefaultSettings(session);
+        this._installToolApprovalHook(session);
     }
 
     async getSessions(): Promise<SessionInfo[]> {
@@ -147,6 +194,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        this._installToolApprovalHook(session);
     }
 
     getModels(): ModelInfo[] {
@@ -162,6 +210,43 @@ export class PiSessionManager {
 
     getThinkingLevel(): string | undefined {
         return this._session?.thinkingLevel;
+    }
+
+    getAutoApproveTools(): boolean {
+        return vscode.workspace.getConfiguration('pi-agent').get<boolean>('autoApproveTools', false);
+    }
+
+    setToolApprovalHandler(handler: ToolApprovalHandler | undefined): void {
+        this._toolApprovalHandler = handler;
+    }
+
+    private _installToolApprovalHook(session: AgentSession): void {
+        try {
+            const runner = session.extensionRunner;
+            if (!runner) return;
+
+            const origEmitToolCall = runner.emitToolCall.bind(runner);
+            const self = this;
+
+            runner.emitToolCall = async (event: any) => {
+                const origResult = await origEmitToolCall(event);
+                if (origResult?.block) return origResult;
+                if (self.getAutoApproveTools()) return origResult;
+                if (!self._toolApprovalHandler) return origResult;
+
+                const approved = await self._toolApprovalHandler(
+                    event.toolCallId,
+                    event.toolName,
+                    event.input,
+                );
+                if (!approved) {
+                    return { block: true, reason: 'User rejected tool call' };
+                }
+                return origResult;
+            };
+        } catch {
+            this._outputChannel.appendLine('Tool approval hook: extension runner not available, skipping');
+        }
     }
 
     getActiveToolNames(): string[] {

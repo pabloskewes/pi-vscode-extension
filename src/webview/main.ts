@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -118,6 +118,12 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'confirmResult':
             handleConfirmResult(msg.action, msg.confirmed, msg.payload);
+            break;
+        case 'toolCallPending':
+            renderToolApprovalCard(msg.pending);
+            break;
+        case 'toolCallResolved':
+            removeToolApprovalCard(msg.toolCallId);
             break;
         case 'error':
             showError(msg.message);
@@ -262,6 +268,7 @@ function render(): void {
     headerActions.innerHTML = `
         <button class="icon-btn" id="btn-new-tab" title="New Agent">+</button>
         <button class="icon-btn" id="btn-sessions" title="Sessions">&#9776;</button>
+        <button class="icon-btn" id="btn-settings" title="Settings">&#9881;</button>
     `;
     header.appendChild(headerActions);
     app.appendChild(header);
@@ -1232,6 +1239,62 @@ function renderToolEnd(event: any): void {
     }
 }
 
+// ── Tool approval cards ──
+
+function renderToolApprovalCard(pending: ToolCallPendingInfo): void {
+    const container = document.getElementById('streaming-message');
+    if (!container) return;
+
+    removePreparingPlaceholder();
+
+    const existing = document.getElementById(`approval-${pending.toolCallId}`);
+    if (existing) return;
+
+    const card = el('div', 'tool-approval-card');
+    card.id = `approval-${pending.toolCallId}`;
+
+    const parsedArgs = typeof pending.args === 'string' ? tryParseJSON(pending.args) : pending.args;
+    const label = getToolLabel(pending.toolName, parsedArgs);
+
+    card.innerHTML = `
+        <div class="tool-header">
+            <span class="tool-icon">${getToolIcon(pending.toolName)}</span>
+            <span class="tool-name">${escHtml(label)}</span>
+            <span class="tool-status pending">awaiting approval</span>
+        </div>
+        <div class="approval-args">${escHtml(formatToolArgs(parsedArgs))}</div>
+        <div class="approval-actions">
+            <button class="approval-btn approve" data-toolcallid="${escHtml(pending.toolCallId)}">Approve</button>
+            <button class="approval-btn reject" data-toolcallid="${escHtml(pending.toolCallId)}">Reject</button>
+        </div>
+    `;
+
+    container.appendChild(card);
+    bindApprovalButtons();
+    scrollToBottom();
+}
+
+function removeToolApprovalCard(toolCallId: string): void {
+    document.getElementById(`approval-${toolCallId}`)?.remove();
+}
+
+function bindApprovalButtons(): void {
+    document.querySelectorAll('.approval-btn:not([data-bound])').forEach((btn) => {
+        btn.setAttribute('data-bound', '1');
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const toolCallId = (btn as HTMLElement).dataset.toolcallid;
+            if (!toolCallId) return;
+            if (btn.classList.contains('approve')) {
+                vscode.postMessage({ type: 'approveToolCall', toolCallId });
+            } else {
+                vscode.postMessage({ type: 'rejectToolCall', toolCallId });
+            }
+            removeToolApprovalCard(toolCallId);
+        });
+    });
+}
+
 // ── Thinking block ──
 
 function buildThinkingBlock(text: string, active: boolean, durationSec?: number): HTMLElement {
@@ -1486,6 +1549,7 @@ function bindStableEvents(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     const newTabBtn = document.getElementById('btn-new-tab');
     const sessionsBtn = document.getElementById('btn-sessions');
+    const settingsBtn = document.getElementById('btn-settings');
 
     input?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1515,6 +1579,7 @@ function bindStableEvents(): void {
 
     newTabBtn?.addEventListener('click', () => vscode.postMessage({ type: 'createTab' }));
     sessionsBtn?.addEventListener('click', () => vscode.postMessage({ type: 'getSessions' }));
+    settingsBtn?.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
 }
 
 function bindTabEvents(): void {
