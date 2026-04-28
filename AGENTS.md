@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Pi Agent is a VS Code extension providing a sidebar chat UI for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, tool approval, checkpoints/rollback, and a dedicated settings page.
+Pi Agent is a VS Code extension providing a sidebar chat UI for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, tool approval, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, and slash-command skills.
 
 ## Build & Test
 
@@ -33,6 +33,8 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 - **CSS variables**: Webview styles use VS Code's CSS custom properties (e.g. `--vscode-editor-background`) for theme compatibility. Never hardcode colors.
 - **SecretStorage for secrets**: API keys are stored via `vscode.SecretStorage`, never in `settings.json` or plaintext.
 - **Tool approval hook**: Tool call interception works by wrapping `extensionRunner.emitToolCall` on the Pi SDK's `AgentSession` after creation. This is the only point where tool execution can be blocked before it starts.
+- **Message queuing**: While streaming, user messages are queued (stored in `TabState.queuedMessages`) and auto-dispatched as new prompts on `agent_end`. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
+- **Skills / slash commands**: Skills are loaded from the Pi SDK and surfaced in the webview via a `getSkills` message. The webview renders a slash-command menu triggered by `/` in the input.
 
 ## File Layout
 
@@ -54,6 +56,7 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 | `src/webview/settings.ts` | Settings UI (runs in webview) |
 | `src/webview/styles/main.css` | Chat styles |
 | `src/webview/styles/settings.css` | Settings page styles |
+| `media/icons/` | UI icons (36x36 grayscale PNGs) |
 
 ## Common Pitfalls
 

@@ -33,6 +33,12 @@ A dedicated settings panel (accessible via the gear icon in the sidebar header o
 ### Tool Approval
 When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons. This gives you full control over what the agent executes before it happens.
 
+### Message Queuing & Steering
+While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
+
+### Slash Commands & Skills
+Type `/` in the input to trigger a slash-command menu that surfaces available Pi skills. Select a skill to insert it into your prompt. Skills are loaded from `~/.pi/agent/skills/` and `.pi/skills/` in your workspace.
+
 ### Context Usage
 Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip.
 
@@ -119,10 +125,12 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 1. Click the **Pi Agent** icon in the activity bar to open the sidebar.
 2. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi: Select Model`).
-3. Type a prompt and press Enter (or Ctrl+Enter for newlines).
+3. Type a prompt and press Enter (or Shift+Enter for newlines).
 4. Watch the agent stream its response, invoke tools, and make file changes.
-5. Review diffs inline or click **Review** to open VS Code's diff editor.
-6. Use checkpoint buttons on your messages to roll back if needed.
+5. While streaming, press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation.
+6. Review diffs inline or click **Review** to open VS Code's diff editor.
+7. Use checkpoint buttons on your messages to roll back if needed.
+8. Type `/` to search and insert skills via the slash-command menu.
 
 ## Keyboard Shortcuts
 
@@ -130,6 +138,8 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 |---|---|
 | `Ctrl+Shift+L` (`Cmd+Shift+L`) | Focus the Pi Agent chat panel |
 | `Ctrl+Shift+N` (`Cmd+Shift+N`) | Start a new chat session |
+| `Enter` | Send prompt, or queue message while streaming |
+| `Ctrl+Enter` (`Cmd+Enter`) | Steer the agent mid-generation |
 | `Escape` | Stop the current generation (while streaming) |
 
 ## Commands
