@@ -2,6 +2,8 @@
 
 A VS Code extension that provides a first-class UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor.
 
+![Pi Agent screenshot](screenshot.png)
+
 ## Features
 
 ### Sidebar Chat Interface
