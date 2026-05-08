@@ -177,7 +177,7 @@ export class SettingsPanel {
             vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'settings.js'),
         );
         const styleUri = this._panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'styles', 'settings.css'),
+            vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'styles', 'settings.css'),
         );
         const nonce = getNonce();
 

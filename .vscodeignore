@@ -2,7 +2,6 @@
 .vscode-test/**
 src/**
 node_modules/**
-!node_modules/@mariozechner/**
 .github/**
 .gitignore
 vitest.config.ts
