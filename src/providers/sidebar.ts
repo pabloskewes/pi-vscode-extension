@@ -31,6 +31,7 @@ interface TabState {
     hasNotification: boolean;
     pendingApprovals: Map<string, PendingApproval>;
     queuedMessages: string[];
+    isStreaming: boolean;
 }
 
 let tabIdCounter = 0;
@@ -62,6 +63,7 @@ function makeTabState(
         hasNotification: false,
         pendingApprovals: new Map(),
         queuedMessages: [],
+        isStreaming: false,
     };
 }
 
@@ -160,6 +162,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const isActive = tab.id === this._activeTabId;
 
         if (event.type === 'agent_start') {
+            tab.isStreaming = true;
             tab.streamingText = '';
             tab.streamingThinking = '';
             tab.isThinking = false;
@@ -191,6 +194,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
 
         if (event.type === 'agent_end') {
+            tab.isStreaming = false;
             tab.streamingText = '';
             tab.streamingThinking = '';
             tab.isThinking = false;
@@ -274,6 +278,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (!tab) return;
 
         const state = tab.session.serializeState();
+        state.isStreaming = tab.isStreaming;
         if (tab.suspendedMessages.length > 0) {
             state.messages = [
                 ...state.messages,
@@ -311,7 +316,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             id,
             name: tab.name,
             isActive: id === this._activeTabId,
-            isStreaming: tab.session.session?.isStreaming ?? false,
+            isStreaming: tab.isStreaming,
             hasNotification: tab.hasNotification,
         }));
     }
@@ -389,6 +394,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.turnCounter = 0;
                     tab.suspendedMessages = [];
                     tab.name = 'New Agent';
+                    tab.isStreaming = false;
                     tab.streamingText = '';
                     tab.streamingThinking = '';
                     tab.isThinking = false;
@@ -405,6 +411,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
                     tab.suspendedMessages = [];
+                    tab.isStreaming = false;
                     tab.streamingText = '';
                     tab.streamingThinking = '';
                     tab.isThinking = false;
@@ -588,11 +595,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const tab = this._activeTab;
         tab.hasNotification = false;
-        if (tab.session.session?.isStreaming) {
-            vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
-        } else {
-            vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
-        }
+        vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', tab.isStreaming);
 
         this.sendStateSync();
     }
@@ -615,7 +618,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'main.js')
         );
         const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'styles', 'main.css')
+            vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'styles', 'main.css')
         );
         const iconsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'media', 'icons')
