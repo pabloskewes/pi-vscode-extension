@@ -164,14 +164,16 @@ function showUsagePopover(): void {
     if (usage.loading) {
         body.innerHTML = '<div class="usage-loading">Loading...</div>';
     } else {
-        const liveProviders = usage.providers.filter((p) => p.id !== 'offline');
-        if (liveProviders.length > 0) {
-            body.appendChild(renderLiveQuotas(liveProviders));
+        const { visible, hidden } = partitionLiveProviders(usage.providers);
+        if (visible.length > 0) {
+            body.appendChild(renderLiveQuotas(visible));
+        } else if (hidden.length > 0) {
+            body.appendChild(renderUnconfiguredProviders(hidden));
         }
         if (usage.periods.length > 0) {
             body.appendChild(renderHistory(usage));
         }
-        if (liveProviders.length === 0 && usage.periods.length === 0) {
+        if (visible.length === 0 && hidden.length === 0 && usage.periods.length === 0) {
             body.innerHTML = '<div class="usage-no-data">No usage data available yet.</div>';
         }
     }
@@ -304,4 +306,54 @@ function formatTokenCount(n: number): string {
     if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
     if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
     return String(n);
+}
+
+function partitionLiveProviders(providers: UsageSnapshotDTO['providers']): {
+    visible: UsageSnapshotDTO['providers'];
+    hidden: UsageSnapshotDTO['providers'];
+} {
+    const visible: UsageSnapshotDTO['providers'] = [];
+    const hidden: UsageSnapshotDTO['providers'] = [];
+    for (const prov of providers) {
+        if (prov.id === 'offline') continue;
+        if (isUsableLiveProvider(prov)) {
+            visible.push(prov);
+        } else {
+            hidden.push(prov);
+        }
+    }
+    return { visible, hidden };
+}
+
+function isUsableLiveProvider(prov: UsageSnapshotDTO['providers'][number]): boolean {
+    if (prov.status === 'unavailable') return false;
+    if (prov.windows.length > 0 || prov.balances.length > 0) return true;
+    return false;
+}
+
+function renderUnconfiguredProviders(providers: UsageSnapshotDTO['providers']): HTMLElement {
+    const section = el('div', 'usage-section');
+    const titleRow = el('div', 'usage-section-title-row');
+    titleRow.innerHTML = '<span class="usage-section-title">Live Quotas</span>';
+    const summary = el('span', 'usage-section-summary');
+    const count = providers.length;
+    summary.textContent = count === 1
+        ? '1 provider skipped (not configured).'
+        : `${count} providers skipped (not configured).`;
+    titleRow.appendChild(summary);
+    section.appendChild(titleRow);
+
+    const list = el('div', 'usage-unconfigured-list');
+    for (const prov of providers) {
+        const row = el('div', 'usage-unconfigured-row');
+        const label = el('span', 'usage-unconfigured-label');
+        label.textContent = prov.label;
+        const reason = el('span', 'usage-unconfigured-reason');
+        reason.textContent = prov.diagnostic || 'Not configured.';
+        row.appendChild(label);
+        row.appendChild(reason);
+        list.appendChild(row);
+    }
+    section.appendChild(list);
+    return section;
 }

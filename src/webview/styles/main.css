@@ -1804,6 +1804,49 @@ body {
     transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
+.usage-section-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.usage-section-summary {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.usage-unconfigured-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.usage-unconfigured-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 12px;
+}
+
+.usage-unconfigured-label {
+    color: var(--muted);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.usage-unconfigured-reason {
+    color: var(--muted);
+    font-size: 11px;
+    text-align: right;
+}
+
 .usage-popover-refresh:hover {
     background: rgba(255, 255, 255, 0.06);
     color: var(--fg);
