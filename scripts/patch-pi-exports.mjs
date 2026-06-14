@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 
 const PACKAGES = [
   {
+    dir: resolve(import.meta.dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent"),
+    name: "@earendil-works/pi-coding-agent",
+  },
+  {
     dir: resolve(import.meta.dirname, "..", "node_modules", "@earendil-works", "pi-agent-core"),
     name: "@earendil-works/pi-agent-core",
   },
@@ -15,6 +19,7 @@ const PACKAGES = [
 let changed = false;
 
 for (const pkg of PACKAGES) {
+  let packageChanged = false;
   const pkgPath = resolve(pkg.dir, "package.json");
   let json;
   try {
@@ -39,19 +44,21 @@ for (const pkg of PACKAGES) {
 
     if (value.import) {
       json.exports[entry] = { ...value, default: value.import };
-      changed = true;
+      packageChanged = true;
       console.log(`PATCH ${pkg.name}: added default -> ${value.import} for ${entry}`);
     } else {
       console.warn(`SKIP ${pkg.name}: subpath ${entry} has no "import" to duplicate as "default"`);
     }
   }
 
-  if (changed) {
+  if (packageChanged) {
     writeFileSync(pkgPath, JSON.stringify(json, null, 2) + "\n", "utf8");
     console.log(`SAVED ${pkg.name}`);
   } else {
     console.log(`OK    ${pkg.name}: already has default exports or nothing to patch`);
   }
+
+  changed ||= packageChanged;
 }
 
 if (!changed) {
