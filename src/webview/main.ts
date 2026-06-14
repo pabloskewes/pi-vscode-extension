@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo } from '../shared/protocol';
+import { setUsageRefreshHandler, setUsageSnapshot, updateUsageFooter } from './usage';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -9,6 +10,10 @@ declare function acquireVsCodeApi(): {
 
 const vscode = acquireVsCodeApi();
 const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
+
+setUsageRefreshHandler(() => {
+    vscode.postMessage({ type: 'refreshUsage' });
+});
 
 // ── State ──
 
@@ -93,6 +98,7 @@ function handleMessage(msg: ServerMessage): void {
         case 'ready':
             vscode.postMessage({ type: 'getState' });
             vscode.postMessage({ type: 'getSkills' });
+            vscode.postMessage({ type: 'requestUsage' });
             break;
         case 'stateSync':
             applyStateSync(msg.state);
@@ -132,6 +138,10 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'skills':
             state.skills = msg.skills;
+            break;
+        case 'usageUpdate':
+            setUsageSnapshot(msg.usage);
+            updateUsageFooter();
             break;
         case 'error':
             showError(msg.message);
@@ -477,6 +487,7 @@ function updateInputArea(): void {
     footer.innerHTML = `
         <span class="footer-model">${escHtml(modelName)}</span>
         <span class="footer-spacer"></span>
+        <div class="usage-bar-slot" id="usage-bar-slot"></div>
         ${contextHtml}
         ${state.isStreaming ? '<button id="btn-abort" class="abort-btn" title="Stop generation (Esc)">&#9632; Stop</button>' : ''}
         ${steerBtnHtml}
@@ -518,6 +529,7 @@ function updateInputArea(): void {
     });
 
     updateQueuedMessageBanner();
+    updateUsageFooter();
 }
 
 let queuedEditingIndex = -1;

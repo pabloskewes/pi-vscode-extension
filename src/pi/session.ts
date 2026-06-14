@@ -62,6 +62,7 @@ export class PiSessionManager {
 
         this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
+        await this._bindExtensions(session);
 
         const model = session.model;
         this._outputChannel.appendLine(
@@ -135,6 +136,7 @@ export class PiSessionManager {
 
     async newSession(): Promise<void> {
         if (!this._session) { return; }
+        await this._shutdownExtensions('new_session');
         this._unsubscribe?.();
         this._session.dispose();
 
@@ -162,6 +164,7 @@ export class PiSessionManager {
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
+        await this._bindExtensions(session);
     }
 
     async getSessions(): Promise<SessionInfo[]> {
@@ -178,6 +181,7 @@ export class PiSessionManager {
 
     async loadSession(sessionPath: string): Promise<void> {
         if (!this._session) { return; }
+        await this._shutdownExtensions('switch_session');
         this._unsubscribe?.();
         this._session.dispose();
 
@@ -195,6 +199,7 @@ export class PiSessionManager {
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         this._installToolApprovalHook(session);
+        await this._bindExtensions(session);
     }
 
     getModels(): ModelInfo[] {
@@ -218,6 +223,48 @@ export class PiSessionManager {
 
     setToolApprovalHandler(handler: ToolApprovalHandler | undefined): void {
         this._toolApprovalHandler = handler;
+    }
+
+    private async _bindExtensions(session: AgentSession): Promise<void> {
+        const loaded = session.resourceLoader.getExtensions();
+        const paths = loaded.extensions.map((ext: any) => ext.path);
+        this._outputChannel.appendLine(
+            `Pi extensions loaded: ${paths.length}${paths.length ? ` (${paths.map((p: string) => p.split('/').slice(-3).join('/')).join(', ')})` : ''}`,
+        );
+        for (const err of loaded.errors ?? []) {
+            this._outputChannel.appendLine(`Pi extension load error: ${err.path}: ${err.error}`);
+        }
+
+        try {
+            await session.bindExtensions({
+                mode: 'rpc',
+                onError: (err: any) => {
+                    this._outputChannel.appendLine(
+                        `Pi extension error: ${err.extensionPath ?? '<unknown>'} ${err.event ?? '<event>'}: ${err.error}`,
+                    );
+                    if (err.stack) {
+                        this._outputChannel.appendLine(err.stack);
+                    }
+                },
+                shutdownHandler: () => {
+                    this._outputChannel.appendLine('Pi extension requested shutdown; ignored by VS Code host.');
+                },
+            } as any);
+            this._outputChannel.appendLine('Pi extension lifecycle started.');
+        } catch (err: any) {
+            this._outputChannel.appendLine(`Failed to start Pi extension lifecycle: ${err.message ?? String(err)}`);
+        }
+    }
+
+    private async _shutdownExtensions(reason: string): Promise<void> {
+        const session = this._session;
+        if (!session) return;
+        try {
+            await (session.extensionRunner as any).emit({ type: 'session_shutdown', reason });
+            this._outputChannel.appendLine(`Pi extension lifecycle stopped: ${reason}.`);
+        } catch (err: any) {
+            this._outputChannel.appendLine(`Failed to stop Pi extension lifecycle: ${err.message ?? String(err)}`);
+        }
     }
 
     private _installToolApprovalHook(session: AgentSession): void {
@@ -331,6 +378,7 @@ export class PiSessionManager {
     }
 
     async dispose(): Promise<void> {
+        await this._shutdownExtensions('shutdown');
         this._unsubscribe?.();
         this._session?.dispose();
         this._session = undefined;

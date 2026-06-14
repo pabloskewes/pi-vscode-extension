@@ -80,6 +80,62 @@ export interface SkillInfo {
     disableModelInvocation: boolean;
 }
 
+export interface UsageWindowDTO {
+    key: string;
+    label: string;
+    usedPercent: number;
+    resetAt?: number;
+    unavailableReason?: string;
+}
+
+export interface UsageBalanceDTO {
+    label: string;
+    remaining: number | null;
+    unit: string;
+}
+
+export interface UsageProviderDTO {
+    id: string;
+    label: string;
+    status: 'live' | 'cached' | 'stale' | 'local' | 'unavailable';
+    windows: UsageWindowDTO[];
+    balances: UsageBalanceDTO[];
+    planName?: string;
+    diagnostic: string;
+    diagnostics: string[];
+    fetchedAt: number;
+}
+
+export interface UsagePeriodRowDTO {
+    key: string;
+    sessionCount: number;
+    messageCount: number;
+    cost: number;
+    tokens: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+}
+
+export interface UsagePeriodDTO {
+    key: string;
+    total: UsagePeriodRowDTO;
+    providers: UsagePeriodRowDTO[];
+    modelsByProvider: Record<string, UsagePeriodRowDTO[]>;
+}
+
+export interface UsageSnapshotDTO {
+    available: boolean;
+    currentProviderId: string | null;
+    currentModelLabel?: string;
+    providers: UsageProviderDTO[];
+    periods: UsagePeriodDTO[];
+    diagnostics: string[];
+    generatedAt: number;
+    loading: boolean;
+}
+
 export interface SessionInfo {
     id: string;
     name?: string;
@@ -116,7 +172,9 @@ export type ClientMessage =
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
-    | { type: 'cancelQueue' };
+    | { type: 'cancelQueue' }
+    | { type: 'requestUsage' }
+    | { type: 'refreshUsage' };
 
 // Settings webview -> Extension messages
 export type SettingsClientMessage =
@@ -140,6 +198,7 @@ export type ServerMessage =
     | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'usageUpdate'; usage: UsageSnapshotDTO }
     | { type: 'error'; message: string };
 
 // Extension -> Settings webview messages
