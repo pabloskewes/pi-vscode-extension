@@ -540,6 +540,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         this._post({ type: 'usageUpdate', usage: this._usageBridge.latest });
                     }
                     break;
+                case 'refreshUsage':
+                    await this._usageBridge.refresh();
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });

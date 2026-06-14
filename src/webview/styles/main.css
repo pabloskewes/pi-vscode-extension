@@ -1734,6 +1734,23 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 
+.usage-refresh-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.usage-refresh-btn:hover,
 .usage-detail-btn:hover {
     background: rgba(255, 255, 255, 0.06);
     color: var(--fg);
@@ -1764,10 +1781,33 @@ body {
     flex-shrink: 0;
 }
 
+.usage-popover-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .usage-popover-title {
     font-weight: 600;
     font-size: 13px;
     color: var(--fg);
+}
+
+.usage-popover-refresh {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.usage-popover-refresh:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg);
+    border-color: rgba(255, 255, 255, 0.14);
 }
 
 .usage-popover-close {

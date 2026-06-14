@@ -1,6 +1,6 @@
 import { marked } from 'marked';
 import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo } from '../shared/protocol';
-import { setUsageSnapshot, updateUsageFooter } from './usage';
+import { setUsageRefreshHandler, setUsageSnapshot, updateUsageFooter } from './usage';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -10,6 +10,10 @@ declare function acquireVsCodeApi(): {
 
 const vscode = acquireVsCodeApi();
 const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
+
+setUsageRefreshHandler(() => {
+    vscode.postMessage({ type: 'refreshUsage' });
+});
 
 // ── State ──
 

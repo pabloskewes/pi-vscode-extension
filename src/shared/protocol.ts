@@ -173,7 +173,8 @@ export type ClientMessage =
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
     | { type: 'cancelQueue' }
-    | { type: 'requestUsage' };
+    | { type: 'requestUsage' }
+    | { type: 'refreshUsage' };
 
 // Settings webview -> Extension messages
 export type SettingsClientMessage =

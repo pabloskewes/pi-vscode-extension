@@ -1,10 +1,15 @@
-import type { UsageSnapshotDTO } from '../shared/protocol';
+import type { ClientMessage, UsageSnapshotDTO } from '../shared/protocol';
 
 let usageSnapshot: UsageSnapshotDTO | undefined;
 let usagePopoverOpen = false;
+let refreshHandler: (() => void) | undefined;
 
 export function setUsageSnapshot(usage: UsageSnapshotDTO): void {
     usageSnapshot = usage;
+}
+
+export function setUsageRefreshHandler(handler: (() => void) | undefined): void {
+    refreshHandler = handler;
 }
 
 export function updateUsageFooter(): void {
@@ -60,9 +65,14 @@ export function updateUsageFooter(): void {
         html += '</span>';
     }
 
+    html += '<button class="usage-refresh-btn" id="btn-usage-refresh" title="Refresh usage"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M13 3v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7a5 5 0 1 0 1 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
     html += '<button class="usage-detail-btn" id="btn-usage-detail" title="Usage details"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v6M8 11h.01M2 8a6 6 0 1 1 12 0A6 6 0 0 1 2 8Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
     slot.innerHTML = html;
 
+    document.getElementById('btn-usage-refresh')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        refreshHandler?.();
+    });
     document.getElementById('btn-usage-detail')?.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleUsagePopover();
@@ -146,7 +156,7 @@ function showUsagePopover(): void {
     popover.id = 'usage-popover';
 
     const header = el('div', 'usage-popover-header');
-    header.innerHTML = '<span class="usage-popover-title">Usage</span><button class="usage-popover-close" id="btn-usage-close">&times;</button>';
+    header.innerHTML = '<div class="usage-popover-header-left"><span class="usage-popover-title">Usage</span></div><div class="usage-popover-actions"><button class="usage-popover-refresh" id="btn-usage-popover-refresh">Refresh</button><button class="usage-popover-close" id="btn-usage-close">&times;</button></div>';
     popover.appendChild(header);
 
     const body = el('div', 'usage-popover-body');
@@ -177,6 +187,10 @@ function showUsagePopover(): void {
     document.getElementById('btn-usage-close')?.addEventListener('click', () => {
         popover.remove();
         usagePopoverOpen = false;
+    });
+    document.getElementById('btn-usage-popover-refresh')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        refreshHandler?.();
     });
 }
 
