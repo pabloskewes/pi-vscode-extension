@@ -19,7 +19,7 @@ describe('Model Registry', () => {
         const registry = getModelRegistry();
         const model = registry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
         expect(model).toBeDefined();
-        expect(model!.provider).toBe(TEST_MODEL_PROVIDER);
+        expect(String(model!.provider)).toBe(TEST_MODEL_PROVIDER);
         expect(typeof model!.id).toBe('string');
     });
 

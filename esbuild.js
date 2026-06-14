@@ -7,7 +7,7 @@ const isWatch = process.argv.includes('--watch');
 const importMetaPlugin = {
     name: 'import-meta-shim',
     setup(build) {
-        build.onLoad({ filter: /node_modules[\\/]@mariozechner[\\/].*\.js$/ }, async (args) => {
+        build.onLoad({ filter: /node_modules[\\/]@(mariozechner|earendil-works)[\\/].*\.js$/ }, async (args) => {
             let contents = await fs.promises.readFile(args.path, 'utf8');
             if (!contents.includes('import.meta')) return;
             contents = contents.replace(
@@ -27,7 +27,7 @@ const extensionConfig = {
     entryPoints: ['src/extension.ts'],
     bundle: true,
     outfile: 'out/extension.js',
-    external: ['vscode'],
+    external: ['vscode', '@mistralai/mistralai'],
     format: 'cjs',
     platform: 'node',
     target: 'node22',

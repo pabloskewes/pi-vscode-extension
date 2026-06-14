@@ -1,8 +1,8 @@
 import { beforeAll, afterAll } from 'vitest';
-import type { AgentSession, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
-export const TEST_MODEL_PROVIDER = 'ollama';
-export const TEST_MODEL_ID = 'local/Qwen3.6-27B-Coding';
+export let TEST_MODEL_PROVIDER = 'opencode-go';
+export let TEST_MODEL_ID = 'deepseek-v4-flash';
 
 let _authStorage: any;
 let _modelRegistry: ModelRegistry;
@@ -11,15 +11,27 @@ let _initialized = false;
 export async function initTestInfra() {
     if (_initialized) { return { authStorage: _authStorage, modelRegistry: _modelRegistry }; }
 
-    const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
+    const { AuthStorage, ModelRegistry } = await import('@earendil-works/pi-coding-agent');
     _authStorage = AuthStorage.create();
     _modelRegistry = ModelRegistry.create(_authStorage);
+    selectTestModel(_modelRegistry);
     _initialized = true;
     return { authStorage: _authStorage, modelRegistry: _modelRegistry };
 }
 
+function selectTestModel(modelRegistry: ModelRegistry): void {
+    const models = modelRegistry.getAvailable();
+    const preferred = models.find((model: any) => String(model.provider) === TEST_MODEL_PROVIDER && model.id === TEST_MODEL_ID);
+    const model = preferred ?? models[0];
+    if (!model) {
+        throw new Error('No models available in registry');
+    }
+    TEST_MODEL_PROVIDER = String(model.provider);
+    TEST_MODEL_ID = model.id;
+}
+
 export async function createTestSession(cwd?: string): Promise<AgentSession> {
-    const { createAgentSession, SessionManager } = await import('@mariozechner/pi-coding-agent');
+    const { createAgentSession, SessionManager } = await import('@earendil-works/pi-coding-agent');
     const { authStorage, modelRegistry } = await initTestInfra();
 
     const fs = await import('fs');

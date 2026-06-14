@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage } from './auth';
@@ -30,7 +30,7 @@ export class PiSessionManager {
 
     async initialize(): Promise<void> {
         this._outputChannel.appendLine('Initializing Pi session...');
-        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
 
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         const authStorage = await getAuthStorage();
@@ -138,9 +138,9 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session.dispose();
 
-        const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-        const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         this._sessionManager = SM.create(cwd);
 
         const config = vscode.workspace.getConfiguration('pi-agent');
@@ -165,7 +165,7 @@ export class PiSessionManager {
     }
 
     async getSessions(): Promise<SessionInfo[]> {
-        const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         const sessions = await SM.list(cwd);
         return sessions.map((s: any) => ({
@@ -181,7 +181,7 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session.dispose();
 
-        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         this._sessionManager = await SM.open(sessionPath, undefined);
 
