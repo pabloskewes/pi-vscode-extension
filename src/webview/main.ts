@@ -1536,6 +1536,19 @@ function addToRecentModels(provider: string, id: string, name?: string): void {
     }
 }
 
+function groupModelsByProvider(models: Array<{ provider: string }>): Array<[string, Array<any>]> {
+    const order: string[] = [];
+    const groups = new Map<string, Array<any>>();
+    for (const model of models) {
+        if (!groups.has(model.provider)) {
+            groups.set(model.provider, []);
+            order.push(model.provider);
+        }
+        groups.get(model.provider)!.push(model);
+    }
+    return order.map((provider) => [provider, groups.get(provider)!]);
+}
+
 function buildModelItem(m: any): HTMLElement {
     const item = el('div', 'model-item');
     const isActive = state.model && m.id === state.model.id && m.provider === state.model.provider;
@@ -1581,14 +1594,20 @@ function showModelPicker(): void {
                 list.appendChild(buildModelItem(full));
             }
         }
-
-        const allHeader = el('div', 'model-section-header');
-        allHeader.textContent = 'All Models';
-        list.appendChild(allHeader);
     }
 
-    for (const m of state.availableModels) {
-        list.appendChild(buildModelItem(m));
+    const grouped = groupModelsByProvider(state.availableModels);
+    for (const [provider, models] of grouped) {
+        const header = el('div', 'model-section-header');
+        header.dataset.provider = provider;
+        header.textContent = provider;
+        list.appendChild(header);
+
+        for (const m of models) {
+            const item = buildModelItem(m);
+            item.dataset.providerGroup = provider;
+            list.appendChild(item);
+        }
     }
     picker.appendChild(list);
 
@@ -1616,7 +1635,18 @@ function showModelPicker(): void {
             (item as HTMLElement).style.display = name.includes(q) ? '' : 'none';
         });
         list.querySelectorAll('.model-section-header').forEach((hdr) => {
-            (hdr as HTMLElement).style.display = q ? 'none' : '';
+            if (q) {
+                (hdr as HTMLElement).style.display = 'none';
+            } else {
+                const provider = (hdr as HTMLElement).dataset.provider;
+                if (!provider) {
+                    (hdr as HTMLElement).style.display = '';
+                    return;
+                }
+                const hasMatch = Array.from(list.querySelectorAll(`.model-item[data-provider-group="${provider}"]`))
+                    .some((it) => (it as HTMLElement).style.display !== 'none');
+                (hdr as HTMLElement).style.display = hasMatch ? '' : 'none';
+            }
         });
     });
 
