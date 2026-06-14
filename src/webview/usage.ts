@@ -119,6 +119,11 @@ function formatResetShort(resetAt: number | undefined): string {
     if (diff <= 0) return 'resetting';
     const mins = Math.floor(diff / 60000);
     if (mins < 60) return `${mins}m`;
+    if (mins >= 1440) {
+        const days = Math.floor(mins / 1440);
+        const remHours = Math.floor((mins % 1440) / 60);
+        return remHours > 0 ? `${days}d${remHours}h` : `${days}d`;
+    }
     const hrs = Math.floor(mins / 60);
     const remMins = mins % 60;
     return `${hrs}h${remMins}m`;
