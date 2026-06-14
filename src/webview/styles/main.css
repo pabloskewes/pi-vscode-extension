@@ -378,13 +378,15 @@ body {
 }
 
 .message-group-user > .message-footer {
-    background: var(--input-bg);
-    padding: 5px 12px 0;
+    background: transparent;
+    padding: 6px 4px 0;
     border-radius: 0;
     border-top: none;
     width: min(100%, 760px);
     max-width: min(88%, 760px);
     text-align: left;
+    color: var(--muted);
+    opacity: 0.9;
 }
 
 .message-group-assistant > .message-footer {
@@ -680,6 +682,14 @@ body {
 .tool-card-wrapper {
     margin: 0 0 4px 0;
 }
+.tool-card-wrapper-diff {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin: 0 16px 8px;
+    width: min(100%, 760px);
+    max-width: min(88%, 760px);
+}
 .tool-card-wrapper > .tool-card {
     margin-bottom: 0;
     border-radius: 0;
@@ -692,6 +702,10 @@ body {
 }
 .tool-card-wrapper > .diff-card:last-child {
     border-radius: var(--radius);
+}
+.tool-card-wrapper-diff > .diff-card,
+.tool-card-wrapper-diff > .tool-footer {
+    width: 100%;
 }
 
 .tool-footer {

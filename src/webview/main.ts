@@ -854,7 +854,7 @@ function renderInlineFileChange(change: FileChangeInfo): void {
 // ── Inline diff card ──
 
 function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
-    const wrapper = el('div', 'tool-card-wrapper');
+    const wrapper = el('div', 'tool-card-wrapper tool-card-wrapper-diff');
 
     const card = el('div', 'diff-card');
     card.id = `diff-${change.toolCallId}`;
