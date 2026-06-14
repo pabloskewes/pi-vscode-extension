@@ -3,6 +3,7 @@ import { PiSessionManager } from '../pi/session';
 import type { ClientMessage, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
+import { UsageBridge } from './usage-bridge';
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -75,6 +76,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
+    private _usageBridge: UsageBridge;
 
     constructor(
         extensionUri: vscode.Uri,
@@ -85,12 +87,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     ) {
         this._extensionUri = extensionUri;
         this._outputChannel = outputChannel;
+        this._usageBridge = new UsageBridge(outputChannel);
 
         const id = nextTabId();
         const tab = makeTabState(id, initialSession, initialDiffManager, initialCheckpointManager);
         this._tabs.set(id, tab);
         this._activeTabId = id;
         this._subscribeTab(tab);
+
+        this._usageBridge.onUpdate((usage) => {
+            this._post({ type: 'usageUpdate', usage });
+        });
     }
 
     private get _activeTab(): TabState {
@@ -120,6 +127,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 for (const unsub of unsubs) unsub();
             }
             this._tabSubscriptions.clear();
+            this._usageBridge.dispose();
         });
 
         this._post({ type: 'ready' });
@@ -146,6 +154,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
             return this._requestToolApproval(tab, toolCallId, toolName, args);
         });
+
+        if (tab.id === this._activeTabId) {
+            this._usageBridge.attach(tab.session.session);
+        }
 
         this._tabSubscriptions.set(tab.id, unsubs);
     }
@@ -403,6 +415,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
+                    this._usageBridge.attach(tab.session.session);
                     this.sendStateSync();
                     break;
                 case 'loadSession':
@@ -421,6 +434,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
                     this._updateTabName(tab);
+                    this._usageBridge.attach(tab.session.session);
                     this.sendStateSync();
                     break;
                 case 'getSessions': {
@@ -521,6 +535,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-agent.openSettings');
                     break;
+                case 'requestUsage':
+                    if (this._usageBridge.latest) {
+                        this._post({ type: 'usageUpdate', usage: this._usageBridge.latest });
+                    }
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
@@ -596,6 +615,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const tab = this._activeTab;
         tab.hasNotification = false;
         vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', tab.isStreaming);
+
+        this._usageBridge.attach(tab.session.session);
 
         this.sendStateSync();
     }

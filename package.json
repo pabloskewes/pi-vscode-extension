@@ -134,6 +134,12 @@
           "minimum": 0,
           "maximum": 100,
           "description": "Show a warning when context usage exceeds this percentage of the context window"
+        },
+        "pi-agent.usageWidget.enabled": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "off"],
+          "description": "Show usage tracking bar in the chat footer when @pi-vault/pi-usage is installed"
         }
       }
     }
@@ -141,14 +147,19 @@
   "scripts": {
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
+    "debug:usage": "node scripts/check-usage-events.mjs",
     "package": "npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links",
+    "postinstall": "node scripts/patch-pi-exports.mjs",
     "test": "vitest",
     "test:unit": "vitest run",
     "test:integration": "node out/test/integration/runTest.js",
     "test:all": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.79.3",
+    "@earendil-works/pi-ai": "^0.79.3",
     "@earendil-works/pi-coding-agent": "^0.79.3",
+    "@earendil-works/pi-tui": "^0.79.3",
     "marked": "^18.0.2"
   },
   "devDependencies": {
