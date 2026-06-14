@@ -93,9 +93,14 @@ export class PiSessionManager {
         }
     }
 
-    async prompt(text: string): Promise<void> {
+    async prompt(text: string, imageDataUrls?: string[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.prompt(text);
+        const images = imageDataUrls?.map(dataUrlToImageContent).filter(Boolean) as any[];
+        if (images && images.length > 0) {
+            await this._session.prompt(text, { images });
+        } else {
+            await this._session.prompt(text);
+        }
     }
 
     async steer(text: string): Promise<void> {
@@ -393,6 +398,12 @@ export class PiSessionManager {
 
 function getProviderId(model: any): string {
     return String(model.provider);
+}
+
+function dataUrlToImageContent(dataUrl: string): { type: string; data: string; mimeType: string } | null {
+    const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (!match) return null;
+    return { type: 'image', data: match[2], mimeType: match[1] };
 }
 
 function safeSerialize(obj: any): any {

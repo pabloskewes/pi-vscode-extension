@@ -39,6 +39,7 @@ const state: {
     activeTabId: string;
     skills: SkillInfo[];
     queuedMessages: string[];
+    pendingImages: Array<{ dataUrl: string; name: string }>;
 } = {
     messages: [],
     isStreaming: false,
@@ -56,6 +57,7 @@ const state: {
     activeTabId: '',
     skills: [],
     queuedMessages: [],
+    pendingImages: [],
 };
 
 // ── Marked config ──
@@ -326,12 +328,23 @@ function render(): void {
     slashMenu.id = 'slash-menu';
     slashMenu.style.display = 'none';
     inputContainer.appendChild(slashMenu);
+    const attachmentRow = el('div', 'attachment-row');
+    attachmentRow.id = 'attachment-row';
+    attachmentRow.style.display = 'none';
+    inputContainer.appendChild(attachmentRow);
     const area = el('div', 'input-area');
     area.innerHTML = `<textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea>`;
     inputContainer.appendChild(area);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
     app.appendChild(inputContainer);
+
+    const lightbox = el('div', 'image-lightbox');
+    lightbox.id = 'image-lightbox';
+    lightbox.style.display = 'none';
+    lightbox.addEventListener('click', hideImageLightbox);
+    lightbox.innerHTML = '<img class="image-lightbox-img" id="image-lightbox-img" alt="">';
+    app.appendChild(lightbox);
 
     // Bind stable event listeners (these elements persist for the lifetime of the skeleton)
     bindStableEvents();
@@ -1833,7 +1846,34 @@ function bindStableEvents(): void {
     const sessionsBtn = document.getElementById('btn-sessions');
     const settingsBtn = document.getElementById('btn-settings');
 
+    input?.addEventListener('paste', (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+            const file = item.getAsFile();
+            if (!file) continue;
+            e.preventDefault();
+            const reader = new FileReader();
+            reader.onload = () => {
+                state.pendingImages.push({ dataUrl: reader.result as string, name: file.name });
+                updateAttachmentRow();
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
     input?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const lb = document.getElementById('image-lightbox');
+            if (lb && lb.style.display !== 'none') {
+                e.preventDefault();
+                hideImageLightbox();
+                return;
+            }
+        }
+
         if (isSlashMenuVisible()) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -2000,12 +2040,66 @@ function sendMessage(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (!input) return;
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && state.pendingImages.length === 0) return;
     input.value = '';
     input.style.height = 'auto';
+    const images = state.pendingImages.length > 0
+        ? state.pendingImages.map(p => p.dataUrl)
+        : undefined;
+    state.pendingImages = [];
+    updateAttachmentRow();
     userHasScrolled = false;
     updateScrollButton();
-    vscode.postMessage({ type: 'prompt', text });
+    vscode.postMessage({ type: 'prompt', text: text || '', images });
+}
+
+function updateAttachmentRow(): void {
+    const row = document.getElementById('attachment-row');
+    if (!row) return;
+    if (state.pendingImages.length === 0) {
+        row.style.display = 'none';
+        row.innerHTML = '';
+        return;
+    }
+    row.style.display = '';
+    row.innerHTML = state.pendingImages.map((img, i) =>
+        `<span class="attachment-chip" data-index="${i}">
+            <img class="attachment-thumb" src="${escAttr(img.dataUrl)}" alt="${escHtml(img.name)}" title="${escHtml(img.name)}" data-index="${i}">
+            <button class="attachment-chip-remove" data-index="${i}" title="Remove">&times;</button>
+        </span>`
+    ).join('');
+    row.querySelectorAll('.attachment-thumb').forEach((thumb) => {
+        thumb.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showImageLightbox((thumb as HTMLImageElement).src);
+        });
+    });
+    row.querySelectorAll('.attachment-chip-remove').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt((btn as HTMLElement).dataset.index ?? '-1', 10);
+            if (idx >= 0 && idx < state.pendingImages.length) {
+                state.pendingImages.splice(idx, 1);
+                updateAttachmentRow();
+            }
+        });
+    });
+}
+
+function showImageLightbox(src: string): void {
+    const box = document.getElementById('image-lightbox');
+    const img = document.getElementById('image-lightbox-img') as HTMLImageElement | null;
+    if (!box || !img) return;
+    img.src = src;
+    box.style.display = '';
+}
+
+function hideImageLightbox(): void {
+    const box = document.getElementById('image-lightbox');
+    if (!box) return;
+    box.style.display = 'none';
+    const img = document.getElementById('image-lightbox-img') as HTMLImageElement | null;
+    if (img) img.src = '';
 }
 
 function bindCopyButtons(): void {
