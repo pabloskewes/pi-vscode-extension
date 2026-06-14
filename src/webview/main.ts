@@ -398,6 +398,7 @@ function updateMessages(): void {
     bindCheckpointButtons();
     bindRedoButtons();
     bindDiffButtons();
+    bindUserMessageToggles();
     bindToolClickable();
 }
 
@@ -921,6 +922,9 @@ function renderDiffLines(diff: string): string {
 
 // ── Message rendering ──
 
+const USER_MESSAGE_COLLAPSE_LINE_LIMIT = 8;
+const USER_MESSAGE_COLLAPSE_CHAR_LIMIT = 700;
+
 function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElement {
     const role = msg.role ?? 'unknown';
 
@@ -948,8 +952,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
         }
         const text = extractText(msg);
         if (text) {
-            const content = el('div', 'message-content');
-            content.innerHTML = renderMarkdown(text);
+            const content = buildUserMessageContent(text);
             wrapper.appendChild(content);
         }
         group.appendChild(wrapper);
@@ -1093,6 +1096,57 @@ function renderStreamingContent(): void {
 
     bindCopyButtons();
     scrollToBottom();
+}
+
+function buildUserMessageContent(text: string): HTMLElement {
+    const content = el('div', 'message-content message-content-user');
+    const normalized = text.replace(/\r\n/g, '\n');
+    const collapsed = shouldCollapseUserMessage(normalized);
+
+    const preview = document.createElement('pre');
+    preview.className = `user-message-text${collapsed ? ' user-message-text-collapsed' : ''}`;
+    preview.textContent = normalized;
+    content.appendChild(preview);
+
+    if (collapsed) {
+        const fade = el('div', 'user-message-fade');
+        content.appendChild(fade);
+
+        const toggle = document.createElement('button');
+        toggle.className = 'user-message-toggle';
+        toggle.type = 'button';
+        toggle.textContent = 'Show more';
+        toggle.dataset.expanded = 'false';
+        content.appendChild(toggle);
+    }
+
+    return content;
+}
+
+function shouldCollapseUserMessage(text: string): boolean {
+    if (text.length > USER_MESSAGE_COLLAPSE_CHAR_LIMIT) return true;
+    return text.split('\n').length > USER_MESSAGE_COLLAPSE_LINE_LIMIT;
+}
+
+function bindUserMessageToggles(): void {
+    document.querySelectorAll('.user-message-toggle:not([data-bound])').forEach((node) => {
+        node.setAttribute('data-bound', '1');
+        node.addEventListener('click', () => {
+            const button = node as HTMLButtonElement;
+            const content = button.closest('.message-content-user');
+            const text = content?.querySelector('.user-message-text');
+            const fade = content?.querySelector('.user-message-fade') as HTMLElement | null;
+            if (!content || !text) return;
+
+            const expanded = button.dataset.expanded === 'true';
+            button.dataset.expanded = expanded ? 'false' : 'true';
+            button.textContent = expanded ? 'Show more' : 'Show less';
+            text.classList.toggle('user-message-text-collapsed', expanded);
+            if (fade) {
+                fade.style.display = expanded ? '' : 'none';
+            }
+        });
+    });
 }
 
 // ── Tool rendering ──
