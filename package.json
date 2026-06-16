@@ -114,7 +114,9 @@
         },
         "pi-agent.allowedTools": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Restrict which tools the agent can use. Leave empty to allow all tools."
         },
@@ -138,7 +140,10 @@
         "pi-agent.usageWidget.enabled": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "off"],
+          "enum": [
+            "auto",
+            "off"
+          ],
           "description": "Show usage tracking bar in the chat footer when @pi-vault/pi-usage is installed"
         }
       }
@@ -160,7 +165,9 @@
     "@earendil-works/pi-ai": "^0.79.3",
     "@earendil-works/pi-coding-agent": "^0.79.3",
     "@earendil-works/pi-tui": "^0.79.3",
-    "marked": "^18.0.2"
+    "marked": "^18.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
