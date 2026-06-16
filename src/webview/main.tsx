@@ -170,6 +170,7 @@ function App(): ReactNode {
     const footerModelRef = useRef<HTMLSpanElement | null>(null);
     const modelPickerRef = useRef<HTMLDivElement | null>(null);
     const modelSearchRef = useRef<HTMLInputElement | null>(null);
+    const fileMenuRef = useRef<HTMLDivElement | null>(null);
     const queuedEditInputRef = useRef<HTMLInputElement | null>(null);
     const isProgrammaticScrollRef = useRef(false);
     const previousTabIdRef = useRef<string | undefined>(undefined);
@@ -793,6 +794,12 @@ function App(): ReactNode {
         state.rollbackPoint,
     ]);
 
+    useLayoutEffect(() => {
+        if (!fileMenuState.items.length) return;
+        const activeItem = fileMenuRef.current?.querySelector(`.slash-item[data-file-menu-index="${fileMenuState.index}"]`) as HTMLElement | null;
+        activeItem?.scrollIntoView({ block: 'nearest' });
+    }, [fileMenuState.index, fileMenuState.items]);
+
     const historyNodes = useMemo(() => buildHistoryNodes({
         state,
         expandedUserMessages,
@@ -1076,7 +1083,7 @@ function App(): ReactNode {
 
                 {fileMenuState.items.length > 0 ? (
                     <>
-                        <div className="slash-menu" id="file-menu">
+                        <div className="slash-menu" id="file-menu" ref={fileMenuRef}>
                             {fileMenuState.items.map((item, index) => {
                                 const depth = Math.max(0, item.relativePath.split('/').length - 1);
                                 const dir = item.relativePath.includes('/')
@@ -1086,6 +1093,7 @@ function App(): ReactNode {
                                 return (
                                     <div
                                         key={`${item.relativePath}-${index}`}
+                                        data-file-menu-index={index}
                                         className={`slash-item${index === fileMenuState.index ? ' slash-item-active' : ''}`}
                                         onMouseMove={() => {
                                             if (index !== fileMenuState.index) {

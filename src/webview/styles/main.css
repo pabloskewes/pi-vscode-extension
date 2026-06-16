@@ -411,15 +411,18 @@ body {
 }
 
 .user-inline-content {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .user-inline-text {
-    white-space: pre-wrap;
-    word-break: break-word;
+    white-space: inherit;
+    word-break: inherit;
+}
+
+.user-inline-content .attachment-chip-inline {
+    margin: 0 1px;
+    vertical-align: middle;
 }
 
 .user-message-text {
