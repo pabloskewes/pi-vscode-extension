@@ -22,6 +22,8 @@ export function getAvailableModels(registry: ModelRegistry): ModelInfo[] {
         provider: String(m.provider),
         id: m.id,
         name: m.name,
+        reasoning: m.reasoning,
+        thinkingLevelMap: m.thinkingLevelMap as Record<string, string | null> | undefined,
     }));
     return filterEnabledModels(models);
 }

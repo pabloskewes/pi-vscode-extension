@@ -215,7 +215,13 @@ export class PiSessionManager {
     getCurrentModel(): ModelInfo | undefined {
         const m = this._session?.model;
         if (!m) { return undefined; }
-        return { provider: getProviderId(m), id: m.id, name: m.name };
+        return {
+            provider: getProviderId(m),
+            id: m.id,
+            name: m.name,
+            reasoning: m.reasoning,
+            thinkingLevelMap: m.thinkingLevelMap as Record<string, string | null> | undefined,
+        };
     }
 
     getThinkingLevel(): string | undefined {
@@ -341,9 +347,18 @@ export class PiSessionManager {
             };
         }
         const model = s.model;
+        const modelInfo: ModelInfo | undefined = model
+            ? {
+                provider: getProviderId(model),
+                id: model.id,
+                name: model.name,
+                reasoning: model.reasoning,
+                thinkingLevelMap: model.thinkingLevelMap as Record<string, string | null> | undefined,
+            }
+            : undefined;
         return {
             messages: s.messages.map(safeSerialize),
-            model: model ? { provider: getProviderId(model), id: model.id, name: model.name } : undefined,
+            model: modelInfo,
             thinkingLevel: s.thinkingLevel,
             isStreaming: s.isStreaming,
             tools: s.getActiveToolNames(),

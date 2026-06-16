@@ -150,8 +150,10 @@
     }
   },
   "scripts": {
-    "compile": "node esbuild.js",
+    "compile": "node esbuild.js && npm run typecheck:webview",
     "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
+    "typecheck:webview": "tsc --noEmit -p tsconfig.webview.json",
     "debug:usage": "node scripts/check-usage-events.mjs",
     "package": "npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links",
     "postinstall": "node scripts/patch-pi-exports.mjs",
@@ -172,6 +174,8 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.25.0",

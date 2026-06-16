@@ -45,7 +45,7 @@ export interface TabInfo {
 
 export interface SerializedAgentState {
     messages: any[];
-    model?: { provider: string; id: string; name?: string };
+    model?: ModelInfo;
     thinkingLevel?: string;
     isStreaming: boolean;
     streamingMessage?: any;
@@ -70,6 +70,8 @@ export interface ModelInfo {
     provider: string;
     id: string;
     name?: string;
+    reasoning?: boolean;
+    thinkingLevelMap?: Record<string, string | null>;
 }
 
 export interface SkillInfo {

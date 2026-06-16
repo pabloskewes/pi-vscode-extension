@@ -238,7 +238,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 const turnIdx = tab.turnCounter;
                 tab.checkpointManager.startTurn(turnIdx);
                 tab.diffManager.setCurrentTurn(turnIdx);
-                tab.session.prompt(text);
+                tab.session.followUp(text);
             }
         }
 
