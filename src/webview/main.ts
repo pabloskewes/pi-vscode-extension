@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, FileReferenceInfo, TabInfo, ToolCallPendingInfo, SkillInfo } from '../shared/protocol';
 import { setUsageRefreshHandler, setUsageSnapshot, updateUsageFooter } from './usage';
 
 declare function acquireVsCodeApi(): {
@@ -140,6 +140,9 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'skills':
             state.skills = msg.skills;
+            break;
+        case 'fileSuggestions':
+            applyFileSuggestions(msg.query, msg.items);
             break;
         case 'usageUpdate':
             setUsageSnapshot(msg.usage);
@@ -317,7 +320,7 @@ function render(): void {
     scrollWrap.appendChild(scrollBtn);
     app.appendChild(scrollWrap);
 
-    // Input container: changed-files slot + queued section + slash menu + input-area (persistent textarea) + footer
+    // Input container: changed-files slot + queued section + slash menu + input-area (persistent editor) + footer
     const inputContainer = el('div', 'input-container');
     const queuedSection = document.createElement('details');
     queuedSection.className = 'queued-section';
@@ -328,13 +331,26 @@ function render(): void {
     slashMenu.id = 'slash-menu';
     slashMenu.style.display = 'none';
     inputContainer.appendChild(slashMenu);
+    const fileMenu = el('div', 'slash-menu');
+    fileMenu.id = 'file-menu';
+    fileMenu.style.display = 'none';
+    inputContainer.appendChild(fileMenu);
+    const fileMenuTree = el('div', 'file-menu-tree');
+    fileMenuTree.id = 'file-menu-tree';
+    fileMenuTree.style.display = 'none';
+    inputContainer.appendChild(fileMenuTree);
+    const usagePopoverAnchor = el('div');
+    usagePopoverAnchor.id = 'usage-popover-anchor';
+    inputContainer.appendChild(usagePopoverAnchor);
+    const composerBody = el('div', 'composer-body');
     const attachmentRow = el('div', 'attachment-row');
     attachmentRow.id = 'attachment-row';
     attachmentRow.style.display = 'none';
-    inputContainer.appendChild(attachmentRow);
+    composerBody.appendChild(attachmentRow);
     const area = el('div', 'input-area');
-    area.innerHTML = `<textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea>`;
-    inputContainer.appendChild(area);
+    area.innerHTML = `<div id="input" class="composer-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask Pi anything..."></div>`;
+    composerBody.appendChild(area);
+    inputContainer.appendChild(composerBody);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
     app.appendChild(inputContainer);
@@ -468,9 +484,9 @@ function updateTabs(): void {
 }
 
 function updateInputArea(): void {
-    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    const input = getComposerInput();
     if (input) {
-        input.placeholder = state.isStreaming
+        input.dataset.placeholder = state.isStreaming
             ? 'Type to queue a message, Ctrl+Enter to steer, Esc to stop...'
             : 'Ask Pi anything...';
     }
@@ -511,10 +527,10 @@ function updateInputArea(): void {
     const sendBtn = document.getElementById('btn-send');
     sendBtn?.addEventListener('click', () => {
         if (state.isStreaming) {
-            const text = input?.value.trim();
+            const { text } = getComposerPayload();
             if (text) {
                 vscode.postMessage({ type: 'queueMessage', text });
-                if (input) { input.value = ''; input.style.height = 'auto'; }
+                clearComposerInput();
             } else {
                 vscode.postMessage({ type: 'abort' });
             }
@@ -525,10 +541,10 @@ function updateInputArea(): void {
 
     const steerBtn = document.getElementById('btn-steer');
     steerBtn?.addEventListener('click', () => {
-        const text = input?.value.trim();
+        const { text } = getComposerPayload();
         if (text) {
             vscode.postMessage({ type: 'steer', text });
-            if (input) { input.value = ''; input.style.height = 'auto'; }
+            clearComposerInput();
             showSteerToast(text);
         }
     });
@@ -541,6 +557,7 @@ function updateInputArea(): void {
         toggleModelPicker();
     });
 
+    updateAttachmentRow();
     updateQueuedMessageBanner();
     updateUsageFooter();
 }
@@ -975,9 +992,16 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
             checkpointBtn.innerHTML = '&#8634;';
             wrapper.appendChild(checkpointBtn);
         }
-        const text = extractText(msg);
-        if (text) {
-            const content = buildUserMessageContent(text);
+        const rawText = extractText(msg);
+        const fallback = extractUserPromptDisplay(rawText);
+        const userText = msg._displayText ?? fallback.userText;
+        const files = Array.isArray(msg._attachedFiles) ? msg._attachedFiles : fallback.files;
+        const normalized = normalizeInlineFileDisplay(userText, files);
+        if (normalized.text) {
+            const content = buildUserMessageContent(normalized.text, normalized.files);
+            wrapper.appendChild(content);
+        } else if (normalized.files.length > 0) {
+            const content = buildUserMessageContent('', normalized.files);
             wrapper.appendChild(content);
         }
         group.appendChild(wrapper);
@@ -1123,9 +1147,16 @@ function renderStreamingContent(): void {
     scrollToBottom();
 }
 
-function buildUserMessageContent(text: string): HTMLElement {
+function buildUserMessageContent(text: string, files: FileReferenceInfo[] = []): HTMLElement {
     const content = el('div', 'message-content message-content-user');
     const normalized = text.replace(/\r\n/g, '\n');
+    if (files.length > 0) {
+        const inline = el('div', 'user-inline-content');
+        appendInlineUserContent(inline, normalized, files);
+        content.appendChild(inline);
+        return content;
+    }
+
     const collapsed = shouldCollapseUserMessage(normalized);
 
     const preview = document.createElement('pre');
@@ -1146,6 +1177,149 @@ function buildUserMessageContent(text: string): HTMLElement {
     }
 
     return content;
+}
+
+function appendInlineUserContent(container: HTMLElement, text: string, files: FileReferenceInfo[]): void {
+    const positionedFiles = files
+        .filter((file) => typeof file.insertOffset === 'number')
+        .map((file) => ({ ...file, insertOffset: Math.max(0, Math.min(text.length, file.insertOffset ?? 0)) }))
+        .sort((a, b) => (a.insertOffset ?? 0) - (b.insertOffset ?? 0));
+
+    if (positionedFiles.length === 0) {
+        for (const file of files) {
+            container.appendChild(buildAttachedFileChip(file));
+        }
+        appendInlineUserText(container, text);
+        return;
+    }
+
+    let textOffset = 0;
+    for (const file of positionedFiles) {
+        const insertOffset = file.insertOffset ?? 0;
+        appendInlineUserText(container, text.slice(textOffset, insertOffset));
+        container.appendChild(buildAttachedFileChip(file));
+        textOffset = insertOffset;
+    }
+    appendInlineUserText(container, text.slice(textOffset));
+}
+
+function appendInlineUserText(container: HTMLElement, text: string): void {
+    if (!text) return;
+    const textEl = el('span', 'user-inline-text');
+    textEl.textContent = text;
+    container.appendChild(textEl);
+}
+
+function buildAttachedFileChips(files: FileReferenceInfo[]): HTMLElement {
+    const row = el('div', 'attachment-row attachment-row-static');
+    for (const file of files) {
+        row.appendChild(buildAttachedFileChip(file));
+    }
+    return row;
+}
+
+function buildAttachedFileChip(file: FileReferenceInfo): HTMLElement {
+    const chip = el('span', 'attachment-chip attachment-chip-file attachment-chip-inline attachment-chip-static');
+    chip.title = file.relativePath;
+    chip.innerHTML = `<span class="attachment-file-icon">@</span><span class="attachment-chip-name">${escHtml(file.displayName)}</span>`;
+    return chip;
+}
+
+function extractUserPromptDisplay(text: string): { userText: string; files: FileReferenceInfo[] } {
+    const legacyPrefix = 'Attached file context:\n\n';
+    const legacySeparator = '\n\nUser request:\n';
+    if (text.startsWith(legacyPrefix)) {
+        const separatorIndex = text.indexOf(legacySeparator);
+        if (separatorIndex !== -1) {
+            const fileBlock = text.slice(legacyPrefix.length, separatorIndex);
+            const userText = text.slice(separatorIndex + legacySeparator.length);
+            return {
+                userText,
+                files: extractFileReferences(fileBlock, /^BEGIN FILE: (.+)$/gm),
+            };
+        }
+    }
+
+    const suffixMarker = '\n\nAttached file context:\n\n';
+    const suffixIndex = text.lastIndexOf(suffixMarker);
+    if (suffixIndex === -1) {
+        return { userText: text, files: [] };
+    }
+
+    const userText = text.slice(0, suffixIndex);
+    const fileBlock = text.slice(suffixIndex + suffixMarker.length);
+    const files = extractFileReferences(fileBlock, /<file path="([^"]+)">/gm);
+    const normalized = stripInlineFileMarkers(userText, files);
+    return {
+        userText: normalized.text,
+        files: normalized.files,
+    };
+}
+
+function extractFileReferences(fileBlock: string, pattern: RegExp): FileReferenceInfo[] {
+    const paths = [...fileBlock.matchAll(pattern)].map((match) => unescapeHtmlEntities(match[1]));
+    const seen = new Set<string>();
+    const files: FileReferenceInfo[] = [];
+    for (const relativePath of paths) {
+        if (seen.has(relativePath)) continue;
+        seen.add(relativePath);
+        files.push({
+            relativePath,
+            displayName: relativePath.split('/').pop() ?? relativePath,
+        });
+    }
+
+    return files;
+}
+
+function unescapeHtmlEntities(value: string): string {
+    const div = document.createElement('div');
+    div.innerHTML = value;
+    return div.textContent ?? value;
+}
+
+function stripInlineFileMarkers(text: string, files: FileReferenceInfo[]): { text: string; files: FileReferenceInfo[] } {
+    let result = '';
+    let remaining = text;
+    const normalizedFiles: FileReferenceInfo[] = [];
+
+    for (const file of files) {
+        const marker = `@${file.relativePath}`;
+        const markerIndex = remaining.indexOf(marker);
+        if (markerIndex === -1) {
+            normalizedFiles.push(file);
+            continue;
+        }
+
+        const beforeMarker = remaining.slice(0, markerIndex);
+        result += beforeMarker;
+        normalizedFiles.push({
+            ...file,
+            insertOffset: result.length,
+        });
+
+        remaining = remaining.slice(markerIndex + marker.length);
+        if (result.endsWith(' ') && remaining.startsWith(' ')) {
+            remaining = remaining.slice(1);
+        }
+    }
+
+    result += remaining;
+    return { text: result, files: normalizedFiles };
+}
+
+function normalizeInlineFileDisplay(text: string, files: FileReferenceInfo[]): { text: string; files: FileReferenceInfo[] } {
+    if (files.length === 0) {
+        return { text, files };
+    }
+
+    const hasInlineMarkers = files.some((file) => text.includes(`@${file.relativePath}`));
+    const hasExplicitOffsets = files.some((file) => typeof file.insertOffset === 'number');
+    if (!hasInlineMarkers && hasExplicitOffsets) {
+        return { text, files };
+    }
+
+    return stripInlineFileMarkers(text, files);
 }
 
 function shouldCollapseUserMessage(text: string): boolean {
@@ -1841,26 +2015,36 @@ function updateStreamingUI(): void {
 // ── Events ──
 
 function bindStableEvents(): void {
-    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    const input = getComposerInput();
     const newTabBtn = document.getElementById('btn-new-tab');
     const sessionsBtn = document.getElementById('btn-sessions');
     const settingsBtn = document.getElementById('btn-settings');
 
     input?.addEventListener('paste', (e) => {
         const items = e.clipboardData?.items;
-        if (!items) return;
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
-            const file = item.getAsFile();
-            if (!file) continue;
+        let handledImage = false;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+                const file = item.getAsFile();
+                if (!file) continue;
+                e.preventDefault();
+                handledImage = true;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    state.pendingImages.push({ dataUrl: reader.result as string, name: file.name });
+                    updateAttachmentRow();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+        if (handledImage) return;
+
+        const text = e.clipboardData?.getData('text/plain');
+        if (text) {
             e.preventDefault();
-            const reader = new FileReader();
-            reader.onload = () => {
-                state.pendingImages.push({ dataUrl: reader.result as string, name: file.name });
-                updateAttachmentRow();
-            };
-            reader.readAsDataURL(file);
+            insertComposerText(text);
         }
     });
 
@@ -1870,6 +2054,29 @@ function bindStableEvents(): void {
             if (lb && lb.style.display !== 'none') {
                 e.preventDefault();
                 hideImageLightbox();
+                return;
+            }
+        }
+
+        if (isFileMenuVisible()) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setFileMenuIndex(Math.min(fileMenuIndex + 1, fileMenuItems.length - 1));
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setFileMenuIndex(Math.max(fileMenuIndex - 1, 0));
+                return;
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                selectFileItem(fileMenuIndex);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                hideFileMenu();
                 return;
             }
         }
@@ -1904,7 +2111,7 @@ function bindStableEvents(): void {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (state.isStreaming) {
-                const text = input.value.trim();
+                const { text } = getComposerPayload();
                 if (text) {
                     if (e.ctrlKey || e.metaKey) {
                         vscode.postMessage({ type: 'steer', text });
@@ -1912,12 +2119,15 @@ function bindStableEvents(): void {
                     } else {
                         vscode.postMessage({ type: 'queueMessage', text });
                     }
-                    input.value = '';
-                    input.style.height = 'auto';
+                    clearComposerInput();
                 }
             } else {
                 sendMessage();
             }
+        }
+        if (e.key === 'Enter' && e.shiftKey) {
+            e.preventDefault();
+            insertComposerText('\n');
         }
         if (e.key === 'Escape' && state.isStreaming) {
             e.preventDefault();
@@ -1927,9 +2137,9 @@ function bindStableEvents(): void {
 
     input?.addEventListener('input', () => {
         if (!input) return;
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+        normalizeComposerEmptyState(input);
         updateSlashMenu(input);
+        updateFileMenu(input);
     });
 
     newTabBtn?.addEventListener('click', () => vscode.postMessage({ type: 'createTab' }));
@@ -2036,21 +2246,295 @@ function bindChangedFileItems(): void {
     });
 }
 
-function sendMessage(): void {
-    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+function getComposerInput(): HTMLElement | null {
+    return document.getElementById('input') as HTMLElement | null;
+}
+
+function getComposerPayload(): { text: string; files: FileReferenceInfo[] } {
+    const input = getComposerInput();
+    if (!input) return { text: '', files: [] };
+
+    const raw = readComposerContent(input);
+    const leadingTrim = raw.text.length - raw.text.trimStart().length;
+    const text = raw.text.trim();
+    const seen = new Set<string>();
+    const files: FileReferenceInfo[] = [];
+
+    for (const file of raw.files) {
+        if (seen.has(file.relativePath)) continue;
+        seen.add(file.relativePath);
+        const rawOffset = file.insertOffset ?? 0;
+        files.push({
+            relativePath: file.relativePath,
+            displayName: file.displayName,
+            insertOffset: Math.max(0, Math.min(text.length, rawOffset - leadingTrim)),
+        });
+    }
+
+    return { text, files };
+}
+
+function readComposerContent(root: Node): { text: string; files: FileReferenceInfo[] } {
+    let text = '';
+    const files: FileReferenceInfo[] = [];
+
+    const walk = (node: Node): void => {
+        if (isComposerFileChip(node)) {
+            files.push({
+                relativePath: node.dataset.filePath ?? '',
+                displayName: node.dataset.fileName ?? node.dataset.filePath ?? '',
+                insertOffset: text.length,
+            });
+            return;
+        }
+
+        if (node.nodeType === Node.TEXT_NODE) {
+            text += node.textContent ?? '';
+            return;
+        }
+
+        if (isLineBreakNode(node)) {
+            text += '\n';
+            return;
+        }
+
+        node.childNodes.forEach(walk);
+    };
+
+    walk(root);
+    return { text, files: files.filter((file) => file.relativePath) };
+}
+
+function getComposerTextBeforeCaret(input: HTMLElement): string {
+    const offset = getComposerCaretTextOffset(input);
+    return readComposerContent(input).text.slice(0, offset);
+}
+
+function getComposerCaretTextOffset(input: HTMLElement): number {
+    const selection = window.getSelection();
+    const anchorNode = selection?.anchorNode;
+    if (!selection || !anchorNode || !isNodeInside(anchorNode, input)) {
+        return readComposerContent(input).text.length;
+    }
+
+    let textOffset = 0;
+    let found = false;
+    const anchorOffset = selection.anchorOffset;
+
+    const walk = (node: Node): void => {
+        if (found) return;
+
+        if (node === anchorNode) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                textOffset += Math.min(anchorOffset, node.textContent?.length ?? 0);
+            } else {
+                const children = Array.from(node.childNodes).slice(0, anchorOffset);
+                for (const child of children) {
+                    textOffset += getComposerNodeTextLength(child);
+                }
+            }
+            found = true;
+            return;
+        }
+
+        if (isComposerFileChip(node)) return;
+
+        if (node.nodeType === Node.TEXT_NODE) {
+            textOffset += node.textContent?.length ?? 0;
+            return;
+        }
+
+        if (isLineBreakNode(node)) {
+            textOffset += 1;
+            return;
+        }
+
+        node.childNodes.forEach(walk);
+    };
+
+    walk(input);
+    return found ? textOffset : readComposerContent(input).text.length;
+}
+
+function getComposerNodeTextLength(node: Node): number {
+    if (isComposerFileChip(node)) return 0;
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0;
+    if (isLineBreakNode(node)) return 1;
+
+    let length = 0;
+    node.childNodes.forEach((child) => {
+        length += getComposerNodeTextLength(child);
+    });
+    return length;
+}
+
+function replaceComposerTextRange(input: HTMLElement, startOffset: number, endOffset: number, replacement: string | Node, trailingText = ''): void {
+    const range = document.createRange();
+    const start = findComposerTextPosition(input, startOffset);
+    const end = findComposerTextPosition(input, endOffset);
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    range.deleteContents();
+
+    if (typeof replacement === 'string') {
+        const textNode = document.createTextNode(replacement);
+        range.insertNode(textNode);
+        setComposerCaret(textNode, textNode.length);
+    } else {
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(replacement);
+        const trailingNode = document.createTextNode(trailingText);
+        fragment.appendChild(trailingNode);
+        range.insertNode(fragment);
+        setComposerCaret(trailingNode, trailingNode.length);
+    }
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function findComposerTextPosition(root: HTMLElement, targetOffset: number): { node: Node; offset: number } {
+    const target = Math.max(0, targetOffset);
+    let textOffset = 0;
+    let found: { node: Node; offset: number } | null = null;
+
+    const walk = (node: Node): void => {
+        if (found) return;
+        if (isComposerFileChip(node)) return;
+
+        if (node.nodeType === Node.TEXT_NODE) {
+            const length = node.textContent?.length ?? 0;
+            if (target <= textOffset + length) {
+                found = { node, offset: Math.max(0, target - textOffset) };
+                return;
+            }
+            textOffset += length;
+            return;
+        }
+
+        if (isLineBreakNode(node)) {
+            if (target <= textOffset) {
+                found = { node: node.parentNode ?? root, offset: getNodeIndex(node) };
+                return;
+            }
+            if (target <= textOffset + 1) {
+                found = { node: node.parentNode ?? root, offset: getNodeIndex(node) + 1 };
+                return;
+            }
+            textOffset += 1;
+            return;
+        }
+
+        node.childNodes.forEach(walk);
+    };
+
+    walk(root);
+    return found ?? { node: root, offset: root.childNodes.length };
+}
+
+function insertComposerText(text: string): void {
+    const input = getComposerInput();
     if (!input) return;
-    const text = input.value.trim();
-    if (!text && state.pendingImages.length === 0) return;
-    input.value = '';
-    input.style.height = 'auto';
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    if (selection && selection.rangeCount > 0 && selection.anchorNode && isNodeInside(selection.anchorNode, input)) {
+        const selectedRange = selection.getRangeAt(0);
+        range.setStart(selectedRange.startContainer, selectedRange.startOffset);
+        range.setEnd(selectedRange.endContainer, selectedRange.endOffset);
+    } else {
+        range.selectNodeContents(input);
+        range.collapse(false);
+    }
+
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    setComposerCaret(textNode, textNode.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function clearComposerInput(): void {
+    const input = getComposerInput();
+    if (!input) return;
+    input.innerHTML = '';
+    hideFileMenu();
+    hideSlashMenu();
+}
+
+function normalizeComposerEmptyState(input: HTMLElement): void {
+    if (!input.querySelector('.attachment-chip-inline') && input.textContent === '') {
+        input.innerHTML = '';
+    }
+}
+
+function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
+    const chip = el('span', 'attachment-chip attachment-chip-file attachment-chip-inline');
+    chip.contentEditable = 'false';
+    chip.dataset.filePath = file.relativePath;
+    chip.dataset.fileName = file.displayName;
+    chip.title = file.relativePath;
+    chip.innerHTML = `
+        <span class="attachment-file-icon">@</span>
+        <span class="attachment-chip-name">${escHtml(file.displayName)}</span>
+        <button class="attachment-chip-remove" type="button" title="Remove">&times;</button>
+    `;
+
+    chip.querySelector('.attachment-chip-remove')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const input = getComposerInput();
+        chip.remove();
+        input?.dispatchEvent(new Event('input', { bubbles: true }));
+        input?.focus();
+    });
+
+    return chip;
+}
+
+function setComposerCaret(node: Node, offset: number): void {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function isComposerFileChip(node: Node): node is HTMLElement {
+    return node instanceof HTMLElement
+        && node.classList.contains('attachment-chip-file')
+        && !!node.dataset.filePath;
+}
+
+function isLineBreakNode(node: Node): boolean {
+    return node instanceof HTMLBRElement;
+}
+
+function isNodeInside(node: Node, root: HTMLElement): boolean {
+    return node === root || root.contains(node);
+}
+
+function getNodeIndex(node: Node): number {
+    return node.parentNode ? Array.prototype.indexOf.call(node.parentNode.childNodes, node) : 0;
+}
+
+function sendMessage(): void {
+    const { text, files } = getComposerPayload();
+    if (!text && state.pendingImages.length === 0 && files.length === 0) return;
+    clearComposerInput();
     const images = state.pendingImages.length > 0
         ? state.pendingImages.map(p => p.dataUrl)
+        : undefined;
+    const attachedFiles = files.length > 0
+        ? files
         : undefined;
     state.pendingImages = [];
     updateAttachmentRow();
     userHasScrolled = false;
     updateScrollButton();
-    vscode.postMessage({ type: 'prompt', text: text || '', images });
+    hideFileMenu();
+    vscode.postMessage({ type: 'prompt', text: text || '', images, files: attachedFiles });
 }
 
 function updateAttachmentRow(): void {
@@ -2062,12 +2546,13 @@ function updateAttachmentRow(): void {
         return;
     }
     row.style.display = '';
-    row.innerHTML = state.pendingImages.map((img, i) =>
+    const imageHtml = state.pendingImages.map((img, i) =>
         `<span class="attachment-chip" data-index="${i}">
             <img class="attachment-thumb" src="${escAttr(img.dataUrl)}" alt="${escHtml(img.name)}" title="${escHtml(img.name)}" data-index="${i}">
-            <button class="attachment-chip-remove" data-index="${i}" title="Remove">&times;</button>
+            <button class="attachment-chip-remove" data-kind="image" data-index="${i}" title="Remove">&times;</button>
         </span>`
     ).join('');
+    row.innerHTML = imageHtml;
     row.querySelectorAll('.attachment-thumb').forEach((thumb) => {
         thumb.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2077,8 +2562,9 @@ function updateAttachmentRow(): void {
     row.querySelectorAll('.attachment-chip-remove').forEach((btn) => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            const kind = (btn as HTMLElement).dataset.kind;
             const idx = parseInt((btn as HTMLElement).dataset.index ?? '-1', 10);
-            if (idx >= 0 && idx < state.pendingImages.length) {
+            if (kind === 'image' && idx >= 0 && idx < state.pendingImages.length) {
                 state.pendingImages.splice(idx, 1);
                 updateAttachmentRow();
             }
@@ -2122,21 +2608,155 @@ function bindCopyButtons(): void {
 
 let slashMenuIndex = 0;
 let slashMenuItems: SkillInfo[] = [];
+let fileMenuIndex = 0;
+let fileMenuItems: FileReferenceInfo[] = [];
+let fileMenuQuery = '';
 
-function updateSlashMenu(input: HTMLTextAreaElement): void {
+function updateFileMenu(input: HTMLElement): void {
+    const menu = document.getElementById('file-menu');
+    if (!menu) return;
+
+    const beforeCursor = getComposerTextBeforeCaret(input);
+    const fileMatch = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
+
+    if (!fileMatch) {
+        hideFileMenu();
+        return;
+    }
+
+    const query = (fileMatch[2] ?? '').toLowerCase();
+    if (query === fileMenuQuery && isFileMenuVisible()) {
+        return;
+    }
+    fileMenuQuery = query;
+    fileMenuIndex = 0;
+    hideSlashMenu();
+    vscode.postMessage({ type: 'searchFiles', query });
+}
+
+function applyFileSuggestions(query: string, items: FileReferenceInfo[]): void {
+    if (query !== fileMenuQuery) return;
+    fileMenuItems = items;
+    fileMenuIndex = Math.min(fileMenuIndex, Math.max(0, fileMenuItems.length - 1));
+    const menu = document.getElementById('file-menu');
+    const tree = document.getElementById('file-menu-tree');
+    if (!menu) return;
+    if (fileMenuItems.length === 0) {
+        hideFileMenu();
+        return;
+    }
+    renderFileMenu(menu);
+    menu.style.display = '';
+    if (tree) {
+        renderFileMenuTree(tree);
+        tree.style.display = '';
+    }
+}
+
+function renderFileMenu(menu: HTMLElement): void {
+    menu.innerHTML = fileMenuItems.map((item, i) => {
+        const active = i === fileMenuIndex ? ' slash-item-active' : '';
+        const depth = Math.max(0, item.relativePath.split('/').length - 1);
+        const dir = item.relativePath.includes('/')
+            ? item.relativePath.split('/').slice(0, -1).join('/')
+            : '';
+        return `<div class="slash-item${active}" data-index="${i}">
+            <span class="slash-item-name slash-item-name-file" style="padding-left:${Math.min(depth * 12, 36)}px">@${escHtml(item.displayName)}</span>
+            <span class="slash-item-desc">${dir ? `${escHtml(dir)}/` : ''}${escHtml(item.displayName)}</span>
+        </div>`;
+    }).join('');
+
+    menu.querySelectorAll('.slash-item').forEach((item) => {
+        item.addEventListener('mousemove', () => {
+            const idx = parseInt((item as HTMLElement).dataset.index ?? '0', 10);
+            if (idx !== fileMenuIndex) {
+                setFileMenuIndex(idx);
+            }
+        });
+        item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const idx = parseInt((item as HTMLElement).dataset.index ?? '0', 10);
+            selectFileItem(idx);
+        });
+    });
+
+    scrollFileMenuItemIntoView(menu);
+}
+
+function setFileMenuIndex(index: number): void {
+    if (fileMenuItems.length === 0) return;
+    fileMenuIndex = Math.max(0, Math.min(index, fileMenuItems.length - 1));
+    const menu = document.getElementById('file-menu');
+    if (menu) renderFileMenu(menu);
+    const tree = document.getElementById('file-menu-tree');
+    if (tree) renderFileMenuTree(tree);
+}
+
+function scrollFileMenuItemIntoView(menu: HTMLElement): void {
+    const active = menu.querySelector(`.slash-item[data-index="${fileMenuIndex}"]`) as HTMLElement | null;
+    if (!active) return;
+    active.scrollIntoView({ block: 'nearest' });
+}
+
+function renderFileMenuTree(tree: HTMLElement): void {
+    const selected = fileMenuItems[fileMenuIndex];
+    if (!selected) {
+        tree.style.display = 'none';
+        tree.innerHTML = '';
+        return;
+    }
+
+    const parts = selected.relativePath.split('/');
+    tree.innerHTML = `
+        <div class="file-menu-tree-card">
+            <div class="file-menu-tree-title">${escHtml(parts[0] ?? selected.relativePath)}</div>
+            <div class="file-menu-tree-lines">
+                ${parts.map((part, idx) => `
+                    <div class="file-menu-tree-line" style="padding-left:${idx * 14}px">
+                        <span class="file-menu-tree-icon">${idx === parts.length - 1 ? '@' : '>'}</span>
+                        <span class="file-menu-tree-label">${escHtml(part)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function selectFileItem(index: number): void {
+    const input = getComposerInput();
+    if (!input) return;
+
+    const file = fileMenuItems[index];
+    if (!file) return;
+
+    const beforeCursor = getComposerTextBeforeCaret(input);
+    const fileMatch = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
+
+    if (fileMatch) {
+        const cursorOffset = getComposerCaretTextOffset(input);
+        const afterCursor = readComposerContent(input).text.slice(cursorOffset);
+        const trailingText = afterCursor && /^\s/.test(afterCursor) ? '' : ' ';
+        const matchStart = beforeCursor.length - fileMatch[0].length + (fileMatch[1] ?? '').length;
+        replaceComposerTextRange(input, matchStart, beforeCursor.length, createComposerFileChip(file), trailingText);
+    }
+
+    hideFileMenu();
+    input.focus();
+}
+
+function updateSlashMenu(input: HTMLElement): void {
     const menu = document.getElementById('slash-menu');
     if (!menu) return;
 
-    const text = input.value;
-    const cursorPos = input.selectionStart;
-
-    const beforeCursor = text.slice(0, cursorPos);
+    const beforeCursor = getComposerTextBeforeCaret(input);
     const slashMatch = beforeCursor.match(/(?:^|\s)(\/\S*)$/);
 
     if (!slashMatch || state.skills.length === 0) {
         hideSlashMenu();
         return;
     }
+
+    hideFileMenu();
 
     const query = slashMatch[1].slice(1).toLowerCase();
     slashMenuItems = state.skills.filter(s =>
@@ -2176,23 +2796,19 @@ function renderSlashMenu(menu: HTMLElement): void {
 }
 
 function selectSlashItem(index: number): void {
-    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    const input = getComposerInput();
     if (!input) return;
 
     const skill = slashMenuItems[index];
     if (!skill) return;
 
-    const text = input.value;
-    const cursorPos = input.selectionStart;
-    const beforeCursor = text.slice(0, cursorPos);
+    const beforeCursor = getComposerTextBeforeCaret(input);
     const slashMatch = beforeCursor.match(/(?:^|\s)(\/\S*)$/);
 
     if (slashMatch) {
         const matchStart = beforeCursor.length - slashMatch[1].length;
         const replacement = `/skill:${skill.name} `;
-        input.value = text.slice(0, matchStart) + replacement + text.slice(cursorPos);
-        const newPos = matchStart + replacement.length;
-        input.setSelectionRange(newPos, newPos);
+        replaceComposerTextRange(input, matchStart, beforeCursor.length, replacement);
     }
 
     hideSlashMenu();
@@ -2212,6 +2828,27 @@ function hideSlashMenu(): void {
 function isSlashMenuVisible(): boolean {
     const menu = document.getElementById('slash-menu');
     return !!menu && menu.style.display !== 'none' && slashMenuItems.length > 0;
+}
+
+function hideFileMenu(): void {
+    const menu = document.getElementById('file-menu');
+    if (menu) {
+        menu.style.display = 'none';
+        menu.innerHTML = '';
+    }
+    const tree = document.getElementById('file-menu-tree');
+    if (tree) {
+        tree.style.display = 'none';
+        tree.innerHTML = '';
+    }
+    fileMenuItems = [];
+    fileMenuIndex = 0;
+    fileMenuQuery = '';
+}
+
+function isFileMenuVisible(): boolean {
+    const menu = document.getElementById('file-menu');
+    return !!menu && menu.style.display !== 'none' && fileMenuItems.length > 0;
 }
 
 // ── Helpers ──

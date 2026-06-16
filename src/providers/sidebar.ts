@@ -1,9 +1,14 @@
 import * as vscode from 'vscode';
 import { PiSessionManager } from '../pi/session';
-import type { ClientMessage, ServerMessage, TabInfo } from '../shared/protocol';
+import type { ClientMessage, FileReferenceInfo, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
+
+const FILE_SEARCH_RESULT_LIMIT = 24;
+const FILE_CONTEXT_MAX_FILES = 6;
+const FILE_CONTEXT_MAX_CHARS_PER_FILE = 20000;
+const FILE_CONTEXT_MAX_TOTAL_CHARS = 60000;
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -33,6 +38,7 @@ interface TabState {
     pendingApprovals: Map<string, PendingApproval>;
     queuedMessages: string[];
     isStreaming: boolean;
+    userPromptDisplay: Map<number, { text: string; files: FileReferenceInfo[] }>;
 }
 
 let tabIdCounter = 0;
@@ -65,6 +71,7 @@ function makeTabState(
         pendingApprovals: new Map(),
         queuedMessages: [],
         isStreaming: false,
+        userPromptDisplay: new Map(),
     };
 }
 
@@ -77,6 +84,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _usageBridge: UsageBridge;
+    private _workspaceFilesCache: string[] | undefined;
 
     constructor(
         extensionUri: vscode.Uri,
@@ -310,7 +318,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             state.queuedMessages = tab.queuedMessages;
         }
         let assistantOrdinal = 0;
+        let userOrdinal = 0;
         for (let i = 0; i < state.messages.length; i++) {
+            if (state.messages[i].role === 'user') {
+                userOrdinal++;
+                const display = tab.userPromptDisplay.get(userOrdinal);
+                if (display) {
+                    state.messages[i]._displayText = display.text;
+                    state.messages[i]._attachedFiles = display.files;
+                }
+            }
             if (state.messages[i].role === 'assistant') {
                 const meta = tab.messageMeta.get(assistantOrdinal);
                 if (meta) {
@@ -352,7 +369,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const turnIdx = tab.turnCounter;
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
-                    await tab.session.prompt(msg.text, msg.images);
+                    tab.userPromptDisplay.set(turnIdx, { text: msg.text, files: msg.files ?? [] });
+                    const promptText = await this._buildPromptText(msg.text, msg.files ?? []);
+                    await tab.session.prompt(promptText, msg.images);
                     break;
                 }
                 case 'steer':
@@ -414,6 +433,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
+                    tab.userPromptDisplay.clear();
                     tab.queuedMessages = [];
                     this._usageBridge.attach(tab.session.session);
                     this.sendStateSync();
@@ -432,6 +452,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
+                    tab.userPromptDisplay.clear();
                     tab.queuedMessages = [];
                     this._updateTabName(tab);
                     this._usageBridge.attach(tab.session.session);
@@ -449,6 +470,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'getSkills': {
                     const skills = tab.session.getSkills();
                     this._post({ type: 'skills', skills });
+                    break;
+                }
+                case 'searchFiles': {
+                    const items = await this._searchFiles(msg.query);
+                    this._post({ type: 'fileSuggestions', query: msg.query, items });
                     break;
                 }
                 case 'approveToolCall':
@@ -547,6 +573,139 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
         }
+    }
+
+    private async _searchFiles(query: string): Promise<FileReferenceInfo[]> {
+        const normalizedQuery = query.trim().toLowerCase();
+        const files = await this._getWorkspaceFiles();
+        const ranked = files
+            .filter((relativePath) => {
+                if (!normalizedQuery) return true;
+                return relativePath.toLowerCase().includes(normalizedQuery);
+            })
+            .sort((a, b) => this._compareFileMatches(a, b, normalizedQuery))
+            .slice(0, FILE_SEARCH_RESULT_LIMIT);
+
+        return ranked.map((relativePath) => ({
+            relativePath,
+            displayName: relativePath.split('/').pop() ?? relativePath,
+        }));
+    }
+
+    private async _getWorkspaceFiles(): Promise<string[]> {
+        if (this._workspaceFilesCache) {
+            return this._workspaceFilesCache;
+        }
+
+        const excludes = '**/{.git,node_modules,dist,out,coverage,.next,.turbo,build}/**';
+        const uris = await vscode.workspace.findFiles('**/*', excludes, 2000);
+        this._workspaceFilesCache = uris
+            .map((uri) => vscode.workspace.asRelativePath(uri, false))
+            .filter((relativePath) => relativePath.length > 0)
+            .sort((a, b) => a.localeCompare(b));
+        return this._workspaceFilesCache;
+    }
+
+    private _compareFileMatches(a: string, b: string, query: string): number {
+        if (!query) {
+            return a.localeCompare(b);
+        }
+
+        const score = (value: string): number => {
+            const lower = value.toLowerCase();
+            const base = lower.split('/').pop() ?? lower;
+            if (base === query) return 0;
+            if (base.startsWith(query)) return 1;
+            if (lower.startsWith(query)) return 2;
+            return 3;
+        };
+
+        const scoreA = score(a);
+        const scoreB = score(b);
+        if (scoreA !== scoreB) return scoreA - scoreB;
+        return a.localeCompare(b);
+    }
+
+    private async _buildPromptText(text: string, files: FileReferenceInfo[]): Promise<string> {
+        if (!files.length) {
+            return text;
+        }
+
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) {
+            return text;
+        }
+
+        const sections: string[] = [];
+        let totalChars = 0;
+
+        for (const file of files.slice(0, FILE_CONTEXT_MAX_FILES)) {
+            const uri = vscode.Uri.joinPath(vscode.Uri.file(root), file.relativePath);
+            try {
+                const bytes = await vscode.workspace.fs.readFile(uri);
+                let content = new TextDecoder().decode(bytes);
+                let note = '';
+                if (content.length > FILE_CONTEXT_MAX_CHARS_PER_FILE) {
+                    content = content.slice(0, FILE_CONTEXT_MAX_CHARS_PER_FILE);
+                    note = `\n[truncated after ${FILE_CONTEXT_MAX_CHARS_PER_FILE} chars]`;
+                }
+
+                const remaining = FILE_CONTEXT_MAX_TOTAL_CHARS - totalChars;
+                if (remaining <= 0) {
+                    sections.push('<attachments-note>Additional attached files were omitted after reaching the total context limit.</attachments-note>');
+                    break;
+                }
+
+                if (content.length > remaining) {
+                    content = content.slice(0, remaining);
+                    note = `\n[truncated after reaching total context limit of ${FILE_CONTEXT_MAX_TOTAL_CHARS} chars]`;
+                }
+
+                totalChars += content.length;
+                sections.push(`<file path="${this._escapeXmlAttribute(file.relativePath)}">\n${content}${note}\n</file>`);
+            } catch {
+                sections.push(`<file path="${this._escapeXmlAttribute(file.relativePath)}">\n[unreadable or missing at send time]\n</file>`);
+            }
+        }
+
+        const fileContext = `Attached file context:\n\n${sections.join('\n\n')}`;
+        const userRequest = this._insertFileMarkers(text, files);
+        return userRequest.trim()
+            ? `${userRequest}\n\n${fileContext}`
+            : fileContext;
+    }
+
+    private _insertFileMarkers(text: string, files: FileReferenceInfo[]): string {
+        const positionedFiles = files
+            .filter((file) => typeof file.insertOffset === 'number')
+            .map((file) => ({ ...file, insertOffset: Math.max(0, Math.min(text.length, file.insertOffset ?? 0)) }))
+            .sort((a, b) => (a.insertOffset ?? 0) - (b.insertOffset ?? 0));
+
+        if (!positionedFiles.length) {
+            return text;
+        }
+
+        let result = '';
+        let textOffset = 0;
+        for (const file of positionedFiles) {
+            const insertOffset = file.insertOffset ?? 0;
+            result += text.slice(textOffset, insertOffset);
+            const marker = `@${file.relativePath}`;
+            const needsLeadingSpace = result.length > 0 && !/\s$/.test(result);
+            const needsTrailingSpace = !!text[insertOffset] && !/^\s/.test(text.slice(insertOffset, insertOffset + 1));
+            result += `${needsLeadingSpace ? ' ' : ''}${marker}${needsTrailingSpace ? ' ' : ''}`;
+            textOffset = insertOffset;
+        }
+        result += text.slice(textOffset);
+        return result;
+    }
+
+    private _escapeXmlAttribute(value: string): string {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {

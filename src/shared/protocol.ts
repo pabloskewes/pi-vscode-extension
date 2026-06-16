@@ -143,9 +143,15 @@ export interface SessionInfo {
     lastModified?: number;
 }
 
+export interface FileReferenceInfo {
+    relativePath: string;
+    displayName: string;
+    insertOffset?: number;
+}
+
 // Webview -> Extension messages
 export type ClientMessage =
-    | { type: 'prompt'; text: string; images?: string[] }
+    | { type: 'prompt'; text: string; images?: string[]; files?: FileReferenceInfo[] }
     | { type: 'steer'; text: string }
     | { type: 'followUp'; text: string }
     | { type: 'abort' }
@@ -169,6 +175,7 @@ export type ClientMessage =
     | { type: 'switchTab'; tabId: string }
     | { type: 'openSettings' }
     | { type: 'getSkills' }
+    | { type: 'searchFiles'; query: string }
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
@@ -198,6 +205,7 @@ export type ServerMessage =
     | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'fileSuggestions'; query: string; items: FileReferenceInfo[] }
     | { type: 'usageUpdate'; usage: UsageSnapshotDTO }
     | { type: 'error'; message: string };
 

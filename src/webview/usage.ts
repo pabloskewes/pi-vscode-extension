@@ -184,9 +184,9 @@ function showUsagePopover(): void {
     }
 
     popover.appendChild(body);
-    const inputArea = container.querySelector('.input-area');
-    if (inputArea) {
-        container.insertBefore(popover, inputArea);
+    const anchor = document.getElementById('usage-popover-anchor');
+    if (anchor && anchor.parentElement === container) {
+        container.insertBefore(popover, anchor);
     } else {
         container.insertBefore(popover, container.firstChild);
     }
