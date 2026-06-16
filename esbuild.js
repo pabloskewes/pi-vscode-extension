@@ -59,12 +59,13 @@ const extensionConfig = {
 };
 
 const webviewConfig = {
-    entryPoints: ['src/webview/main.ts'],
+    entryPoints: ['src/webview/main.tsx'],
     bundle: true,
     outfile: 'out/webview/main.js',
     format: 'iife',
     platform: 'browser',
     target: 'es2022',
+    jsx: 'automatic',
     sourcemap: true,
     minify: false,
 };
