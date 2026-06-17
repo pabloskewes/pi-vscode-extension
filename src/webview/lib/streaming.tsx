@@ -1,5 +1,5 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import type { FileChangeInfo, ToolCallPendingInfo } from '../../shared/protocol';
+import type { CompletionSound, FileChangeInfo, ToolCallPendingInfo } from '../../shared/protocol';
 import DiffCard from '../components/messages/DiffCard';
 import ToolResultCard from '../components/messages/ToolResultCard';
 import type {
@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import { extractToolResultText, tryParseJSON } from './format';
 import { getToolIconNode, getToolLabel } from './tools';
+import { playCompletionSound } from './sound';
 
 export function handleAgentEvent(
   event: AgentEvent,
@@ -22,7 +23,8 @@ export function handleAgentEvent(
   setToolApprovals: Dispatch<SetStateAction<ToolCallPendingInfo[]>>,
   setUserHasScrolled: Dispatch<SetStateAction<boolean>>,
   dismissSteerToast: () => void,
-  clearSteerToastImmediately: () => void
+  clearSteerToastImmediately: () => void,
+  completionSound: CompletionSound
 ): void {
   switch (event.type) {
     case 'message_update':
@@ -63,6 +65,7 @@ export function handleAgentEvent(
       setStreamingItems([]);
       setToolApprovals([]);
       clearSteerToastImmediately();
+      playCompletionSound(completionSound);
       break;
 
     case 'tool_execution_start':
@@ -109,7 +112,14 @@ export function applySerializedState(
     queuedMessages: Array.isArray(serialized.queuedMessages)
       ? (serialized.queuedMessages as string[])
       : [],
+    completionSound: isCompletionSound(serialized.completionSound)
+      ? serialized.completionSound
+      : previous.completionSound,
   };
+}
+
+function isCompletionSound(value: unknown): value is CompletionSound {
+  return value === 'off' || value === 'chime' || value === 'subtle';
 }
 
 export function applyStreamingDelta(

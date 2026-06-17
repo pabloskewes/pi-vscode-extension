@@ -1,4 +1,5 @@
 import type {
+  CompletionSound,
   FileChangeInfo,
   FileReferenceInfo,
   ModelInfo,
@@ -30,6 +31,7 @@ export interface WebviewState {
   skills: SkillInfo[];
   queuedMessages: string[];
   pendingImages: Array<{ dataUrl: string; name: string }>;
+  completionSound: CompletionSound;
 }
 
 export interface ContextUsageInfo {

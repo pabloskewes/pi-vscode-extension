@@ -84,6 +84,11 @@ function render(data: SettingsData): void {
             'Custom path for session data. Leave empty for the default workspace .pi/ directory.'),
         buildRange('contextUsageWarningThreshold', 'Context Usage Warning', data.contextUsageWarningThreshold, 0, 100,
             `Warn when context usage exceeds ${data.contextUsageWarningThreshold}% of the context window.`),
+        buildSelect('completionSound', 'Completion Sound', data.completionSound, [
+            { value: 'off', label: 'Off' },
+            { value: 'chime', label: 'Chime' },
+            { value: 'subtle', label: 'Subtle' },
+        ], 'Sound played when the agent finishes generating a response.'),
     ]));
 
     const skillsSection = buildSection('Skills', [buildSkillsPlaceholder()]);

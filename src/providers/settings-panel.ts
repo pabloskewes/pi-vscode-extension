@@ -112,6 +112,7 @@ export class SettingsPanel {
             autoSaveSessions: config.get<boolean>('autoSaveSessions', true),
             sessionStoragePath: config.get<string>('sessionStoragePath', ''),
             contextUsageWarningThreshold: config.get<number>('contextUsageWarningThreshold', 80),
+            completionSound: config.get<'off' | 'chime' | 'subtle'>('completionSound', 'off'),
         };
 
         this._post({ type: 'settings', data });

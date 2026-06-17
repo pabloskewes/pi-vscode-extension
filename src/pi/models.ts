@@ -70,7 +70,7 @@ function wildcardMatch(value: string, pattern: string): boolean {
     return new RegExp(`^${escaped}$`).test(value);
 }
 
-export function findModel(registry: ModelRegistry, provider: string, modelId: string) {
+export function findModel(registry: ModelRegistry, provider: string, modelId: string): ReturnType<ModelRegistry['find']> {
     return registry.find(provider, modelId);
 }
 

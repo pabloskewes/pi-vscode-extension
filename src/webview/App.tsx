@@ -65,6 +65,7 @@ const initialState: WebviewState = {
   skills: [],
   queuedMessages: [],
   pendingImages: [],
+  completionSound: 'off',
 };
 
 const FILE_REFS_MIME = 'application/x-pi-file-references';
@@ -1016,7 +1017,8 @@ export default function App(): ReactNode {
             setToolApprovals,
             setUserHasScrolled,
             dismissSteerToast,
-            clearSteerToastImmediately
+            clearSteerToastImmediately,
+            stateRef.current.completionSound
           );
           break;
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { PiSessionManager } from '../pi/session';
-import type { ClientMessage, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
+import type { ClientMessage, CompletionSound, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
@@ -99,6 +99,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._extensionUri = extensionUri;
         this._outputChannel = outputChannel;
         this._usageBridge = new UsageBridge(outputChannel);
+
+        const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('pi-agent.completionSound')) {
+                this.sendStateSync();
+            }
+        });
+        this._tabSubscriptions.set('__config', [() => configListener.dispose()]);
 
         const id = nextTabId();
         const tab = makeTabState(id, initialSession, initialDiffManager, initialCheckpointManager);
@@ -322,6 +329,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (tab.queuedMessages.length > 0) {
             state.queuedMessages = tab.queuedMessages;
         }
+
+        const config = vscode.workspace.getConfiguration('pi-agent');
+        const completionSound = config.get<CompletionSound>('completionSound', 'off');
+        state.completionSound = completionSound;
+
         let assistantOrdinal = 0;
         let userOrdinal = 0;
         for (let i = 0; i < state.messages.length; i++) {

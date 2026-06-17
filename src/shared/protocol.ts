@@ -4,6 +4,8 @@ export interface ContextUsageInfo {
     percent: number | null;
 }
 
+export type CompletionSound = 'off' | 'chime' | 'subtle';
+
 export interface SettingsData {
     apiProvider: string;
     apiBaseUrl: string;
@@ -16,6 +18,7 @@ export interface SettingsData {
     autoSaveSessions: boolean;
     sessionStoragePath: string;
     contextUsageWarningThreshold: number;
+    completionSound: CompletionSound;
 }
 
 export interface ToolCallPendingInfo {
@@ -64,6 +67,7 @@ export interface SerializedAgentState {
     thinkingStartTime?: number;
     streamingThinkingDuration?: number;
     queuedMessages?: string[];
+    completionSound?: CompletionSound;
 }
 
 export interface ModelInfo {

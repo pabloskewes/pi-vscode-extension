@@ -137,6 +137,16 @@
           "maximum": 100,
           "description": "Show a warning when context usage exceeds this percentage of the context window"
         },
+        "pi-agent.completionSound": {
+          "type": "string",
+          "default": "off",
+          "enum": [
+            "off",
+            "chime",
+            "subtle"
+          ],
+          "description": "Sound played when the agent finishes generating a response"
+        },
         "pi-agent.usageWidget.enabled": {
           "type": "string",
           "default": "auto",
