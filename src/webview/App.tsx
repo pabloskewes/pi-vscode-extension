@@ -5,12 +5,14 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import type {
   FileReferenceInfo,
   ModelInfo,
+  ResolvedFileReference,
   ServerMessage,
   SessionInfo,
   ToolCallPendingInfo,
@@ -28,10 +30,16 @@ import {
   getComposerTextBeforeCaret,
   getComposerCaretTextOffset,
   insertComposerText,
+  insertComposerTextNode,
+  insertComposerFragment,
   normalizeComposerEmptyState,
   readComposerContent,
+  replaceTextNodeWithFragment,
   replaceComposerTextRange,
   createComposerFileChip,
+  parsePathTokens,
+  readChipFileReferences,
+  serializeChipsToText,
 } from './lib/composer';
 import { isNearBottom } from './lib/dom';
 import { addToRecentModels } from './lib/models';
@@ -59,6 +67,19 @@ const initialState: WebviewState = {
   pendingImages: [],
 };
 
+const FILE_REFS_MIME = 'application/x-pi-file-references';
+
+interface ClipboardFileRefsPayload {
+  text: string;
+  files: FileReferenceInfo[];
+}
+
+interface ComposerFragmentFile {
+  token: string;
+  kind: 'workspace' | 'external' | 'unresolved';
+  file: FileReferenceInfo | null;
+}
+
 export default function App(): ReactNode {
   const [state, setState] = useState<WebviewState>(initialState);
   const [usage, setUsage] = useState<UsageSnapshotDTO>();
@@ -79,6 +100,7 @@ export default function App(): ReactNode {
   const [queuedEditingText, setQueuedEditingText] = useState('');
   const [expandedUserMessages, setExpandedUserMessages] = useState<Record<number, boolean>>({});
   const [changedFilesOpen, setChangedFilesOpen] = useState(false);
+  const [composerDragOver, setComposerDragOver] = useState(false);
   const [fileMenuState, setFileMenuState] = useState<FileMenuState>({
     items: [],
     index: 0,
@@ -105,6 +127,15 @@ export default function App(): ReactNode {
   const isProgrammaticScrollRef = useRef(false);
   const previousTabIdRef = useRef<string | undefined>(undefined);
   const steerToastTimerRef = useRef<number | null>(null);
+  const requestCounterRef = useRef(0);
+
+  const pendingPasteResolutionsRef = useRef(
+    new Map<string, (items: ResolvedFileReference[]) => void>()
+  );
+
+  const pendingDropResolutionsRef = useRef(
+    new Map<string, (items: ResolvedFileReference[]) => void>()
+  );
 
   const hideFileMenu = (): void => {
     setFileMenuState({ items: [], index: 0, query: '' });
@@ -165,6 +196,145 @@ export default function App(): ReactNode {
     setSteerToastText(text.length > 80 ? `${text.slice(0, 80)}...` : text);
   };
 
+  const nextRequestId = (prefix: string): string => {
+    requestCounterRef.current += 1;
+    return `${prefix}-${Date.now()}-${requestCounterRef.current}`;
+  };
+
+  const readClipboardFilePayload = (value: string | undefined): ClipboardFileRefsPayload | null => {
+    if (!value) return null;
+    try {
+      const parsed = JSON.parse(value) as ClipboardFileRefsPayload;
+      if (!parsed || typeof parsed.text !== 'string' || !Array.isArray(parsed.files)) {
+        return null;
+      }
+      const files = parsed.files
+        .filter((file): file is FileReferenceInfo => {
+          return !!file && typeof file.relativePath === 'string' && typeof file.displayName === 'string';
+        })
+        .map((file) => ({
+          relativePath: file.relativePath,
+          absolutePath: file.absolutePath,
+          displayName: file.displayName,
+          insertOffset: typeof file.insertOffset === 'number' ? file.insertOffset : undefined,
+        }));
+      return { text: parsed.text, files };
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveFileReferences = (tokens: string[]): Promise<ResolvedFileReference[]> => {
+    if (tokens.length === 0) {
+      return Promise.resolve([]);
+    }
+    const requestId = nextRequestId('paste');
+    return new Promise((resolve) => {
+      pendingPasteResolutionsRef.current.set(requestId, resolve);
+      vscode.postMessage({ type: 'resolveFileReferences', requestId, tokens });
+    });
+  };
+
+  const resolveDroppedFiles = (paths: string[]): Promise<ResolvedFileReference[]> => {
+    if (paths.length === 0) return Promise.resolve([]);
+    const requestId = nextRequestId('drop');
+    return new Promise((resolve) => {
+      pendingDropResolutionsRef.current.set(requestId, resolve);
+      vscode.postMessage({ type: 'resolveDroppedFiles', requestId, paths });
+    });
+  };
+
+  const collectDropPaths = (event: DragEvent<HTMLDivElement>): string[] => {
+    const dt = event.dataTransfer;
+    if (!dt) return [];
+
+    const uriList = dt.getData('text/uri-list');
+    if (uriList) {
+      return uriList.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && line.startsWith('file://'))
+        .map((uri) => {
+          try {
+            const decoded = decodeURIComponent(uri);
+            return decoded.startsWith('file://') ? decoded.slice(7) : decoded;
+          } catch {
+            return uri.startsWith('file://') ? uri.slice(7) : uri;
+          }
+        });
+    }
+
+    const files = dt.files;
+    if (files && files.length > 0) {
+      return Array.from(files)
+        .map((f) => (f as any).path)
+        .filter((p): p is string => typeof p === 'string' && p.length > 0);
+    }
+
+    const plain = dt.getData('text/plain').trim();
+    if (plain && /^(?:\/|[A-Za-z]:\\)/.test(plain)) {
+      return [plain];
+    }
+
+    return [];
+  };
+
+  const setComposerCaretFromPoint = (
+    input: HTMLElement,
+    clientX: number,
+    clientY: number
+  ): void => {
+    const rangeFromPoint = document.caretRangeFromPoint(clientX, clientY);
+    if (!rangeFromPoint) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    if (!input.contains(rangeFromPoint.startContainer)) return;
+
+    selection.removeAllRanges();
+    selection.addRange(rangeFromPoint);
+  };
+
+  const buildComposerFragmentFromText = (
+    text: string,
+    filesByToken: Map<string, ComposerFragmentFile>
+  ): DocumentFragment => {
+    const fragment = document.createDocumentFragment();
+    const tokens = parsePathTokens(text);
+    if (tokens.length === 0) {
+      fragment.appendChild(document.createTextNode(text));
+      return fragment;
+    }
+
+    let textOffset = 0;
+    for (const token of tokens) {
+      if (token.start > textOffset) {
+        fragment.appendChild(document.createTextNode(text.slice(textOffset, token.start)));
+      }
+
+      const resolved = filesByToken.get(token.path);
+      if (resolved?.kind === 'workspace' && resolved.file) {
+        fragment.appendChild(createComposerFileChip(resolved.file));
+      } else {
+        fragment.appendChild(document.createTextNode(token.marker));
+      }
+      textOffset = token.end;
+    }
+
+    if (textOffset < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(textOffset)));
+    }
+    return fragment;
+  };
+
+  const buildFilesByToken = (items: ComposerFragmentFile[]): Map<string, ComposerFragmentFile> => {
+    const filesByToken = new Map<string, ComposerFragmentFile>();
+    for (const item of items) {
+      filesByToken.set(item.token, item);
+    }
+    return filesByToken;
+  };
+
   const updateFileMenuFromInput = (input: HTMLElement): void => {
     const beforeCursor = getComposerTextBeforeCaret(input);
     const fileMatch = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
@@ -220,9 +390,97 @@ export default function App(): ReactNode {
     updateFileMenuFromInput(input);
   };
 
+  const handleComposerDragEnter = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setComposerDragOver(true);
+  };
+
+  const handleComposerDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    if (!composerDragOver) {
+      setComposerDragOver(true);
+    }
+  };
+
+  const handleComposerDragLeave = (event: DragEvent<HTMLDivElement>): void => {
+    if ((event.target as HTMLElement)?.closest('.input-container') !== event.currentTarget) {
+      return;
+    }
+    setComposerDragOver(false);
+  };
+
+  const handleComposerDrop = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setComposerDragOver(false);
+
+    const input = inputRef.current;
+    if (!input) return;
+
+    const dt = event.dataTransfer;
+    vscode.postMessage({ type: '__debug', event: 'drop', data: {
+      types: dt?.types ? Array.from(dt.types) : [],
+      fileCount: dt?.files?.length ?? 0,
+      uriList: dt?.getData('text/uri-list')?.substring(0, 500),
+      plain: dt?.getData('text/plain')?.substring(0, 200),
+    } });
+
+    if (dt?.files) {
+      for (let i = 0; i < dt.files.length; i++) {
+        const file = dt.files[i];
+        if (!file.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          setState((previous) => ({
+            ...previous,
+            pendingImages: [
+              ...previous.pendingImages,
+              { dataUrl: reader.result as string, name: file.name },
+            ],
+          }));
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    setComposerCaretFromPoint(input, event.clientX, event.clientY);
+
+    const paths = collectDropPaths(event);
+    if (paths.length === 0) {
+      vscode.postMessage({ type: '__debug', event: 'drop-no-paths', data: {} });
+      return;
+    }
+
+    vscode.postMessage({ type: '__debug', event: 'drop-paths', data: { paths } });
+
+    void resolveDroppedFiles(paths).then((resolvedItems) => {
+      const currentInput = inputRef.current;
+      if (!currentInput) return;
+
+      const chipItems = resolvedItems.filter(
+        (item) => item.kind === 'workspace' && item.file
+      );
+      if (chipItems.length === 0) return;
+
+      const fragment = document.createDocumentFragment();
+      for (const item of chipItems) {
+        fragment.appendChild(createComposerFileChip(item.file!));
+      }
+
+      insertComposerFragment(currentInput, fragment);
+    });
+  };
+
   const handleComposerPaste = (event: ClipboardEvent<HTMLDivElement>): void => {
     const items = event.clipboardData?.items;
     let handledImage = false;
+
+    vscode.postMessage({ type: '__debug', event: 'paste', data: {
+      types: event.clipboardData?.types ? Array.from(event.clipboardData.types) : [],
+      textPlain: event.clipboardData?.getData('text/plain')?.substring(0, 200),
+      textHtml: event.clipboardData?.getData('text/html')?.substring(0, 200),
+      fileRefs: event.clipboardData?.getData(FILE_REFS_MIME),
+      itemCount: items?.length ?? 0,
+    } });
 
     if (items) {
       for (let index = 0; index < items.length; index++) {
@@ -249,11 +507,168 @@ export default function App(): ReactNode {
 
     if (handledImage) return;
 
+    const structured = readClipboardFilePayload(event.clipboardData?.getData(FILE_REFS_MIME));
+    if (structured && inputRef.current) {
+      event.preventDefault();
+      const items: ComposerFragmentFile[] = [];
+      for (const token of parsePathTokens(structured.text)) {
+        const file = structured.files.find((candidate) => {
+          return token.path === candidate.absolutePath || token.path === candidate.relativePath;
+        });
+        if (file) {
+          items.push({ token: token.path, kind: 'workspace', file });
+        }
+      }
+      insertComposerFragment(
+        inputRef.current,
+        buildComposerFragmentFromText(structured.text, buildFilesByToken(items))
+      );
+      return;
+    }
+
     const text = event.clipboardData?.getData('text/plain');
     if (!text || !inputRef.current) return;
 
     event.preventDefault();
-    insertComposerText(inputRef.current, text);
+    const insertedTextNode = insertComposerTextNode(inputRef.current, text);
+
+    const parsedTokens = parsePathTokens(text);
+    if (parsedTokens.length === 0) {
+      return;
+    }
+
+    void resolveFileReferences(parsedTokens.map((token) => token.path)).then((resolvedItems) => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (!resolvedItems.some((item) => item.kind === 'workspace' && item.file)) {
+        return;
+      }
+      replaceTextNodeWithFragment(
+        input,
+        insertedTextNode,
+        buildComposerFragmentFromText(text, buildFilesByToken(resolvedItems))
+      );
+    });
+  };
+
+  const handleComposerCopy = (event: React.ClipboardEvent<HTMLDivElement>): void => {
+    const input = inputRef.current;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !input) return;
+
+    vscode.postMessage({ type: '__debug', event: 'composer-copy', data: {
+      hasSelection: selection.rangeCount > 0,
+      anchorInInput: !!input.contains(selection.anchorNode),
+    } });
+
+    const range = selection.getRangeAt(0);
+    const isSelectingAll =
+      range.startContainer === input && range.startOffset === 0 &&
+      range.endContainer === input && range.endOffset === input.childNodes.length;
+
+    let source: Node = range.cloneContents();
+    if (isSelectingAll) {
+      source = input.cloneNode(true);
+      (source as HTMLElement).removeAttribute('data-placeholder');
+    }
+    removeClipboardOnlyControls(source);
+
+    const copiedFiles =
+      source instanceof DocumentFragment || source instanceof HTMLElement
+        ? readChipFileReferences(source)
+        : [];
+    serializeChipsToText(source);
+
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(source instanceof DocumentFragment ? source : source.cloneNode(true));
+    const text = wrapper.innerText;
+
+    event.clipboardData?.setData('text/plain', text);
+    if (copiedFiles.length > 0) {
+      event.clipboardData?.setData(FILE_REFS_MIME, JSON.stringify({ text, files: copiedFiles }));
+    }
+    event.preventDefault();
+  };
+
+  const serializeSelectionWithChips = (
+    root: HTMLElement,
+    clipboardData: DataTransfer | null
+  ): boolean => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !clipboardData) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer) && range.commonAncestorContainer !== root) {
+      return false;
+    }
+
+    const isSelectingAll =
+      range.startContainer === root && range.startOffset === 0 &&
+      range.endContainer === root && range.endOffset === root.childNodes.length;
+
+    let source: Node = range.cloneContents();
+    if (isSelectingAll) {
+      source = root.cloneNode(true);
+      if (source instanceof HTMLElement) {
+        source.removeAttribute('data-placeholder');
+      }
+    }
+    removeClipboardOnlyControls(source);
+
+    const copiedFiles =
+      source instanceof DocumentFragment || source instanceof HTMLElement
+        ? readChipFileReferences(source)
+        : [];
+    serializeChipsToText(source);
+
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(source instanceof DocumentFragment ? source : source.cloneNode(true));
+    const text = wrapper.innerText;
+
+    clipboardData.setData('text/plain', text);
+    if (copiedFiles.length > 0) {
+      clipboardData.setData(FILE_REFS_MIME, JSON.stringify({ text, files: copiedFiles }));
+    }
+    return true;
+  };
+
+  const removeClipboardOnlyControls = (source: Node): void => {
+    if (!(source instanceof HTMLElement) && !(source instanceof DocumentFragment)) return;
+    const controls = Array.from(
+      source.querySelectorAll('.checkpoint-btn, .copy-btn, .attachment-chip-remove')
+    );
+    for (const control of controls) {
+      control.remove();
+    }
+  };
+
+  const handleMessagesCopy = (event: React.ClipboardEvent<HTMLDivElement>): void => {
+    const messages = messagesRef.current;
+    if (!messages) return;
+    if (serializeSelectionWithChips(messages, event.clipboardData)) {
+      event.preventDefault();
+    }
+  };
+
+  const handleMessagesKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key.toLowerCase() !== 'a' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    const message = target.closest('.message') as HTMLElement | null;
+    if (!message || !messagesRef.current?.contains(message)) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const range = document.createRange();
+    range.selectNodeContents(message);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    event.preventDefault();
   };
 
   const selectFileItem = (index: number): void => {
@@ -548,6 +963,29 @@ export default function App(): ReactNode {
   }, []);
 
   useEffect(() => {
+    const handleDocumentCopy = (event: globalThis.ClipboardEvent): void => {
+      const selection = window.getSelection();
+      const anchorNode = selection?.anchorNode;
+      const messages = messagesRef.current;
+      if (!selection || !anchorNode || !messages) return;
+      if (inputRef.current?.contains(anchorNode)) return;
+      if (!messages.contains(anchorNode)) return;
+
+      vscode.postMessage({ type: '__debug', event: 'document-copy', data: { hasSelection: selection.rangeCount > 0 } });
+
+      if (serializeSelectionWithChips(messages, event.clipboardData)) {
+        event.preventDefault();
+        vscode.postMessage({ type: '__debug', event: 'document-copy-custom-clipboard', data: {} });
+      }
+    };
+
+    document.addEventListener('copy', handleDocumentCopy);
+    return () => {
+      document.removeEventListener('copy', handleDocumentCopy);
+    };
+  }, []);
+
+  useEffect(() => {
     const listener = (event: MessageEvent) => {
       const message = event.data as ServerMessage;
 
@@ -677,6 +1115,22 @@ export default function App(): ReactNode {
           }));
           break;
 
+        case 'resolvedFileReferences': {
+          const resolver = pendingPasteResolutionsRef.current.get(message.requestId);
+          if (!resolver) break;
+          pendingPasteResolutionsRef.current.delete(message.requestId);
+          resolver(message.items);
+          break;
+        }
+
+        case 'resolvedDroppedFiles': {
+          const resolver = pendingDropResolutionsRef.current.get(message.requestId);
+          if (!resolver) break;
+          pendingDropResolutionsRef.current.delete(message.requestId);
+          resolver(message.items);
+          break;
+        }
+
         case 'usageUpdate':
           setUsage(message.usage);
           break;
@@ -754,6 +1208,8 @@ export default function App(): ReactNode {
       if (steerToastTimerRef.current) {
         window.clearTimeout(steerToastTimerRef.current);
       }
+      pendingPasteResolutionsRef.current.clear();
+      pendingDropResolutionsRef.current.clear();
     };
   }, []);
 
@@ -916,6 +1372,8 @@ export default function App(): ReactNode {
         }}
         onTouchStart={() => setUserHasScrolled(true)}
         onMessagesClick={handleMessagesClick}
+        onMessagesCopy={handleMessagesCopy}
+        onMessagesKeyDown={handleMessagesKeyDown}
         onOpenDiff={openDiff}
         onOpenFile={openFile}
         onApproveToolCall={handleApproveToolCall}
@@ -936,6 +1394,7 @@ export default function App(): ReactNode {
         usage={usage}
         usagePopoverOpen={usagePopoverOpen}
         changedFilesOpen={changedFilesOpen}
+        composerDragOver={composerDragOver}
         fileMenuState={fileMenuState}
         slashMenuState={slashMenuState}
         modelPickerOpen={modelPickerOpen}
@@ -977,8 +1436,13 @@ export default function App(): ReactNode {
         onSetLightboxSrc={setLightboxSrc}
         onRemovePendingImage={handleRemovePendingImage}
         onComposerPaste={handleComposerPaste}
+        onComposerCopy={handleComposerCopy}
         onComposerKeyDown={handleComposerKeyDown}
         onComposerInput={handleComposerInput}
+        onComposerDragEnter={handleComposerDragEnter}
+        onComposerDragOver={handleComposerDragOver}
+        onComposerDragLeave={handleComposerDragLeave}
+        onComposerDrop={handleComposerDrop}
         onToggleModelPicker={handleToggleModelPicker}
         onModelSearchChange={setModelSearch}
         onSelectModel={handleSelectModel}

@@ -39,6 +39,13 @@ interface ComposerContent {
   files: FileReferenceInfo[];
 }
 
+export interface ParsedPathToken {
+  marker: string;
+  path: string;
+  start: number;
+  end: number;
+}
+
 export function readComposerContent(root: Node): ComposerContent {
   let text = '';
   const files: FileReferenceInfo[] = [];
@@ -207,6 +214,10 @@ export function findComposerTextPosition(
 }
 
 export function insertComposerText(input: HTMLElement, text: string): void {
+  insertComposerTextNode(input, text);
+}
+
+export function insertComposerTextNode(input: HTMLElement, text: string): Text {
   const selection = window.getSelection();
   const range = document.createRange();
 
@@ -223,6 +234,37 @@ export function insertComposerText(input: HTMLElement, text: string): void {
   const textNode = document.createTextNode(text);
   range.insertNode(textNode);
   setComposerCaret(textNode, textNode.length);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return textNode;
+}
+
+export function insertComposerFragment(input: HTMLElement, fragment: DocumentFragment): void {
+  const selection = window.getSelection();
+  const range = document.createRange();
+
+  if (selection && selection.rangeCount > 0 && selection.anchorNode && isNodeInside(selection.anchorNode, input)) {
+    const selectedRange = selection.getRangeAt(0);
+    range.setStart(selectedRange.startContainer, selectedRange.startOffset);
+    range.setEnd(selectedRange.endContainer, selectedRange.endOffset);
+  } else {
+    range.selectNodeContents(input);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+  const caretNode = document.createTextNode('');
+  fragment.appendChild(caretNode);
+  range.insertNode(fragment);
+  setComposerCaret(caretNode, 0);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+export function replaceTextNodeWithFragment(input: HTMLElement, textNode: Text, fragment: DocumentFragment): void {
+  if (!textNode.parentNode || !isNodeInside(textNode, input)) return;
+  const caretNode = document.createTextNode('');
+  fragment.appendChild(caretNode);
+  textNode.parentNode.replaceChild(fragment, textNode);
+  setComposerCaret(caretNode, 0);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
@@ -260,6 +302,30 @@ export function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
   return chip;
 }
 
+export function parsePathTokens(text: string): ParsedPathToken[] {
+  const tokens: ParsedPathToken[] = [];
+  const matcher = /@(?:"([^"\n]+)"|'([^'\n]+)'|([^\s@]+))/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(text)) !== null) {
+    const marker = match[0] ?? '';
+    let path = match[1] ?? match[2] ?? match[3] ?? '';
+    if (!marker || !path) continue;
+
+    // Strip trailing punctuation that is not part of a file path
+    path = path.replace(/[?!,;:)}\]]+$/, '');
+
+    tokens.push({
+      marker,
+      path,
+      start: match.index,
+      end: match.index + marker.length,
+    });
+  }
+
+  return tokens;
+}
+
 export function setComposerCaret(node: Node, offset: number): void {
   const selection = window.getSelection();
   if (!selection) return;
@@ -280,4 +346,40 @@ export function isComposerFileChip(node: Node): node is HTMLElement {
 
 export function isLineBreakNode(node: Node): boolean {
   return node instanceof HTMLBRElement;
+}
+
+export function serializeChipsToText(root: Node): void {
+  if (!(root instanceof HTMLElement) && !(root instanceof DocumentFragment) && !(root instanceof Document)) return;
+  const chips = Array.from((root as ParentNode).querySelectorAll('.attachment-chip-file[data-file-path]'));
+  for (const chip of chips) {
+    const element = chip as HTMLElement;
+    const filePath = element.dataset.absolutePath ?? element.dataset.filePath ?? '';
+    const serializedPath = /\s/.test(filePath) ? `@"${filePath}"` : `@${filePath}`;
+    const textNode = document.createTextNode(serializedPath);
+    element.parentNode?.replaceChild(textNode, element);
+  }
+}
+
+export function readChipFileReferences(root: ParentNode): FileReferenceInfo[] {
+  const chips = Array.from(root.querySelectorAll('.attachment-chip-file[data-file-path]'));
+  const seen = new Set<string>();
+  const files: FileReferenceInfo[] = [];
+
+  for (const chip of chips) {
+    const element = chip as HTMLElement;
+    const relativePath = element.dataset.filePath ?? '';
+    if (!relativePath) continue;
+    const absolutePath = element.dataset.absolutePath;
+    const dedupeKey = absolutePath ?? relativePath;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    files.push({
+      relativePath,
+      absolutePath,
+      displayName: element.dataset.fileName ?? relativePath,
+    });
+  }
+
+  return files;
 }

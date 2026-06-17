@@ -10,6 +10,9 @@ export default function AttachedFileChip({ file }: AttachedFileChipProps): React
     <span
       className="attachment-chip attachment-chip-file attachment-chip-inline attachment-chip-static"
       title={file.relativePath}
+      data-file-path={file.relativePath}
+      data-absolute-path={file.absolutePath}
+      data-file-name={file.displayName}
     >
       <span className="attachment-file-icon">@</span>
       <span className="attachment-chip-name">{file.displayName}</span>

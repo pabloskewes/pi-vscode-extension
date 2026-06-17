@@ -152,6 +152,12 @@ export interface FileReferenceInfo {
     insertOffset?: number;
 }
 
+export interface ResolvedFileReference {
+    token: string;
+    kind: 'workspace' | 'external' | 'unresolved';
+    file: FileReferenceInfo | null;
+}
+
 // Webview -> Extension messages
 export type ClientMessage =
     | { type: 'prompt'; text: string; images?: string[]; files?: FileReferenceInfo[] }
@@ -179,12 +185,15 @@ export type ClientMessage =
     | { type: 'openSettings' }
     | { type: 'getSkills' }
     | { type: 'searchFiles'; query: string }
+    | { type: 'resolveFileReferences'; requestId: string; tokens: string[] }
+    | { type: 'resolveDroppedFiles'; requestId: string; paths: string[] }
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
     | { type: 'cancelQueue' }
     | { type: 'requestUsage' }
-    | { type: 'refreshUsage' };
+    | { type: 'refreshUsage' }
+    | { type: '__debug'; event: string; data: unknown };
 
 // Settings webview -> Extension messages
 export type SettingsClientMessage =
@@ -209,6 +218,8 @@ export type ServerMessage =
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
     | { type: 'fileSuggestions'; query: string; items: FileReferenceInfo[] }
+    | { type: 'resolvedFileReferences'; requestId: string; items: ResolvedFileReference[] }
+    | { type: 'resolvedDroppedFiles'; requestId: string; items: ResolvedFileReference[] }
     | { type: 'usageUpdate'; usage: UsageSnapshotDTO }
     | { type: 'error'; message: string };
 

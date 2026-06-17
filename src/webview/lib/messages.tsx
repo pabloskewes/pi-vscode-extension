@@ -449,8 +449,8 @@ export function renderHistoryMessage(options: RenderHistoryMessageOptions): Reac
     const footer = buildMessageFooter(state.messages, message, index);
 
     return (
-      <div className={`message-group-user${dimmed ? ' dimmed' : ''}`} key={`msg-${index}`}>
-        <div className="message message-user">
+        <div className={`message-group-user${dimmed ? ' dimmed' : ''}`} key={`msg-${index}`}>
+        <div className="message message-user" tabIndex={0}>
           {userTurnNumber !== undefined && !state.isStreaming ? (
             <button
               className="checkpoint-btn"
@@ -485,7 +485,7 @@ export function renderHistoryMessage(options: RenderHistoryMessageOptions): Reac
   const footer = buildMessageFooter(state.messages, message, index);
   return (
     <div className={`message-group-assistant${dimmed ? ' dimmed' : ''}`} key={`msg-${index}`}>
-      <div className="message message-assistant">
+      <div className="message message-assistant" tabIndex={0}>
         {thinking ? (
           <ThinkingBlock
             text={thinking}

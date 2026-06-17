@@ -365,6 +365,10 @@ body {
 .message-assistant {
     padding: 0;
 }
+.message:focus-visible {
+    outline: 1px solid var(--focus-border);
+    outline-offset: 2px;
+}
 .message-assistant > .message-content {
     padding: 8px 16px 16px;
 }
@@ -888,6 +892,7 @@ body {
 
 .attachment-chip-static {
     cursor: default;
+    user-select: text;
 }
 
 .attachment-file-icon {
@@ -971,6 +976,11 @@ body {
     flex-shrink: 0;
     user-select: none;
     position: relative;
+}
+
+.input-container.composer-drag-over {
+    border-color: var(--focus-border);
+    box-shadow: 0 0 0 1px var(--focus-border);
 }
 
 /* ── Input ── */

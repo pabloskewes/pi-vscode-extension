@@ -20,6 +20,8 @@ interface MessagesProps {
   onWheel: (event: React.WheelEvent<HTMLDivElement>) => void;
   onTouchStart: () => void;
   onMessagesClick: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onMessagesCopy: (event: React.ClipboardEvent<HTMLDivElement>) => void;
+  onMessagesKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   onOpenDiff: (filePath: string, toolCallId: string) => void;
   onOpenFile: (filePath: string) => void;
   onApproveToolCall: (toolCallId: string) => void;
@@ -38,6 +40,8 @@ export default function Messages({
   onWheel,
   onTouchStart,
   onMessagesClick,
+  onMessagesCopy,
+  onMessagesKeyDown,
   onOpenDiff,
   onOpenFile,
   onApproveToolCall,
@@ -58,6 +62,8 @@ export default function Messages({
       id="messages"
       ref={messagesRef}
       onClick={onMessagesClick}
+      onCopy={onMessagesCopy}
+      onKeyDown={onMessagesKeyDown}
       onWheel={onWheel}
       onTouchStart={onTouchStart}
       onScroll={onScroll}

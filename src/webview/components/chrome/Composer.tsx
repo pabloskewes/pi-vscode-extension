@@ -1,5 +1,6 @@
 import type {
   ClipboardEvent,
+  DragEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MutableRefObject,
   ReactNode,
@@ -25,6 +26,7 @@ interface ComposerProps {
   usage?: UsageSnapshotDTO;
   usagePopoverOpen: boolean;
   changedFilesOpen: boolean;
+  composerDragOver: boolean;
   fileMenuState: FileMenuState;
   slashMenuState: SlashMenuState;
   modelPickerOpen: boolean;
@@ -57,8 +59,13 @@ interface ComposerProps {
   onSetLightboxSrc: (src: string) => void;
   onRemovePendingImage: (index: number) => void;
   onComposerPaste: (event: ClipboardEvent<HTMLDivElement>) => void;
+  onComposerCopy: (event: React.ClipboardEvent<HTMLDivElement>) => void;
   onComposerKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onComposerInput: () => void;
+  onComposerDragEnter: (event: DragEvent<HTMLDivElement>) => void;
+  onComposerDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onComposerDragLeave: (event: DragEvent<HTMLDivElement>) => void;
+  onComposerDrop: (event: DragEvent<HTMLDivElement>) => void;
   onToggleModelPicker: () => void;
   onModelSearchChange: (value: string) => void;
   onSelectModel: (provider: string, modelId: string) => void;
@@ -76,6 +83,7 @@ export default function Composer({
   usage,
   usagePopoverOpen,
   changedFilesOpen,
+  composerDragOver,
   fileMenuState,
   slashMenuState,
   modelPickerOpen,
@@ -107,8 +115,13 @@ export default function Composer({
   onSetLightboxSrc,
   onRemovePendingImage,
   onComposerPaste,
+  onComposerCopy,
   onComposerKeyDown,
   onComposerInput,
+  onComposerDragEnter,
+  onComposerDragOver,
+  onComposerDragLeave,
+  onComposerDrop,
   onToggleModelPicker,
   onModelSearchChange,
   onSelectModel,
@@ -123,7 +136,13 @@ export default function Composer({
   const uniqueFileChanges = getUniqueFileChanges(state.fileChanges);
 
   return (
-    <div className="input-container">
+    <div
+      className={`input-container${composerDragOver ? ' composer-drag-over' : ''}`}
+      onDragEnter={onComposerDragEnter}
+      onDragOver={onComposerDragOver}
+      onDragLeave={onComposerDragLeave}
+      onDrop={onComposerDrop}
+    >
       {state.fileChanges.length > 0 ? (
         <ChangedFilesSection
           fileChanges={uniqueFileChanges}
@@ -226,6 +245,7 @@ export default function Composer({
             }
             ref={inputRef}
             onPaste={onComposerPaste}
+            onCopy={onComposerCopy}
             onKeyDown={onComposerKeyDown}
             onInput={onComposerInput}
           />

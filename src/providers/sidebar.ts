@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { PiSessionManager } from '../pi/session';
-import type { ClientMessage, FileReferenceInfo, ServerMessage, TabInfo } from '../shared/protocol';
+import type { ClientMessage, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
@@ -477,6 +478,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     this._post({ type: 'fileSuggestions', query: msg.query, items });
                     break;
                 }
+                case 'resolveFileReferences': {
+                    this._outputChannel.appendLine(`[PI-DEBUG] resolveFileReferences tokens: ${JSON.stringify(msg.tokens)}`);
+                    const items = await this._resolveFileReferences(msg.tokens);
+                    this._outputChannel.appendLine(`[PI-DEBUG] resolveFileReferences resolved: ${JSON.stringify(items.map(i => ({ t: i.token, k: i.kind, f: i.file?.relativePath ?? null })))}`);
+                    this._post({ type: 'resolvedFileReferences', requestId: msg.requestId, items });
+                    break;
+                }
+                case 'resolveDroppedFiles': {
+                    const items = await this._resolveFileReferences(msg.paths);
+                    this._post({ type: 'resolvedDroppedFiles', requestId: msg.requestId, items });
+                    break;
+                }
                 case 'approveToolCall':
                     this._resolveToolApproval(tab, msg.toolCallId, true);
                     break;
@@ -569,6 +582,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'refreshUsage':
                     await this._usageBridge.refresh();
                     break;
+                case '__debug':
+                    void this._handleDebug(msg.event, msg.data);
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
@@ -590,6 +606,47 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return ranked;
     }
 
+    private async _resolveFileReferences(tokens: string[]): Promise<ResolvedFileReference[]> {
+        const files = await this._getWorkspaceFiles();
+        const byAbsolute = new Map<string, FileReferenceInfo>();
+        const byRelative = new Map<string, FileReferenceInfo>();
+
+        for (const file of files) {
+            if (file.absolutePath) {
+                byAbsolute.set(this._normalizeLookupKey(file.absolutePath), file);
+            }
+            byRelative.set(this._normalizeLookupKey(file.relativePath), file);
+        }
+
+        const resolved: ResolvedFileReference[] = [];
+        for (const token of tokens) {
+            const candidate = token.trim();
+            if (!candidate) {
+                resolved.push({ token, kind: 'unresolved', file: null });
+                continue;
+            }
+
+            const normalized = this._normalizeLookupKey(candidate);
+            const inWorkspace = byAbsolute.get(normalized) ?? byRelative.get(normalized);
+            if (inWorkspace) {
+                resolved.push({ token, kind: 'workspace', file: inWorkspace });
+                continue;
+            }
+
+            const uri = this._toUriFromPathCandidate(candidate);
+            if (uri && await this._isRegularFile(uri)) {
+                const file = this._toFileReference(uri, candidate);
+                const kind = this._isWorkspaceFileReference(file) ? 'workspace' : 'external';
+                resolved.push({ token, kind, file });
+                continue;
+            }
+
+            resolved.push({ token, kind: 'unresolved', file: null });
+        }
+
+        return resolved;
+    }
+
     private async _getWorkspaceFiles(): Promise<FileReferenceInfo[]> {
         if (this._workspaceFilesCache) {
             return this._workspaceFilesCache;
@@ -609,6 +666,56 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             .filter((file) => file.relativePath.length > 0)
             .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
         return this._workspaceFilesCache;
+    }
+
+    private _normalizeLookupKey(value: string): string {
+        return value.replace(/\\/g, '/').toLowerCase();
+    }
+
+    private _toUriFromPathCandidate(candidate: string): vscode.Uri | undefined {
+        const trimmed = candidate.trim();
+        if (!trimmed) return undefined;
+
+        if (trimmed.startsWith('file://')) {
+            try {
+                return vscode.Uri.parse(trimmed);
+            } catch {
+                return undefined;
+            }
+        }
+
+        if (path.isAbsolute(trimmed)) {
+            return vscode.Uri.file(trimmed);
+        }
+
+        return undefined;
+    }
+
+    private async _isRegularFile(uri: vscode.Uri): Promise<boolean> {
+        try {
+            const stat = await vscode.workspace.fs.stat(uri);
+            return (stat.type & vscode.FileType.Directory) === 0;
+        } catch {
+            return false;
+        }
+    }
+
+    private _toFileReference(uri: vscode.Uri, fallbackPath?: string): FileReferenceInfo {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        const relativePath = workspaceFolder
+            ? vscode.workspace.asRelativePath(uri, false)
+            : (fallbackPath?.trim() || uri.fsPath);
+
+        return {
+            relativePath,
+            absolutePath: uri.fsPath,
+            displayName: path.basename(uri.fsPath) || relativePath,
+        };
+    }
+
+    private _isWorkspaceFileReference(file: FileReferenceInfo): boolean {
+        if (!file.absolutePath) return false;
+        return !!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file.absolutePath));
     }
 
     private _compareFileMatches(a: string, b: string, query: string): number {
@@ -845,6 +952,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+    }
+    private async _handleDebug(event: string, data: unknown): Promise<void> {
+        const timestamp = new Date().toISOString();
+        const payload = JSON.stringify(data);
+        const line = `[${timestamp}] [PI-DEBUG] ${event} ${payload}`;
+
+        this._outputChannel.appendLine(line);
+
+        try {
+            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (wsRoot) {
+                const debugDir = path.join(wsRoot, '.vscode');
+                await vscode.workspace.fs.createDirectory(vscode.Uri.file(debugDir));
+                const logPath = path.join(debugDir, 'interaction-debug.log');
+                const fs = await import('fs');
+                fs.appendFileSync(logPath, line + '\n');
+            }
+        } catch {
+            // silently ignore file write failures
+        }
     }
 }
 
