@@ -145,6 +145,18 @@
             "off"
           ],
           "description": "Show usage tracking bar in the chat footer when @pi-vault/pi-usage is installed"
+        },
+        "pi-agent.debugMcp.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the local webview debug MCP server for development workflows"
+        },
+        "pi-agent.debugMcp.port": {
+          "type": "number",
+          "default": 38473,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Localhost port used by the webview debug MCP server"
         }
       }
     }
@@ -163,13 +175,15 @@
     "test:all": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@earendil-works/pi-agent-core": "^0.79.3",
     "@earendil-works/pi-ai": "^0.79.3",
     "@earendil-works/pi-coding-agent": "^0.79.3",
     "@earendil-works/pi-tui": "^0.79.3",
     "marked": "^18.0.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

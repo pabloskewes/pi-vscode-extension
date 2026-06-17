@@ -5,6 +5,7 @@ import type { ClientMessage, FileReferenceInfo, ResolvedFileReference, ServerMes
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
+import { WebviewDebugController } from '../debug/mcp-server';
 
 const FILE_SEARCH_RESULT_LIMIT = 24;
 const FILE_CONTEXT_MAX_FILES = 6;
@@ -93,6 +94,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         initialDiffManager: DiffManager,
         initialCheckpointManager: CheckpointManager,
         outputChannel: vscode.OutputChannel,
+        private readonly _debugController: WebviewDebugController,
     ) {
         this._extensionUri = extensionUri;
         this._outputChannel = outputChannel;
@@ -126,12 +128,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         };
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
+        this._debugController.attachWebview(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage((msg: ClientMessage) => {
             this._handleMessage(msg);
         });
 
         webviewView.onDidDispose(() => {
+            this._debugController.detachWebview(webviewView.webview);
             for (const [, unsubs] of this._tabSubscriptions) {
                 for (const unsub of unsubs) unsub();
             }
@@ -582,8 +586,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'refreshUsage':
                     await this._usageBridge.refresh();
                     break;
-                case '__debug':
-                    void this._handleDebug(msg.event, msg.data);
+                case '__debugBridge':
+                    this._debugController.handleClientMessage(msg.message);
                     break;
             }
         } catch (err: any) {
@@ -929,6 +933,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'main.js')
         );
+        const bridgeUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'out', 'debug', 'bridge.js')
+        );
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'out', 'webview', 'styles', 'main.css')
         );
@@ -949,29 +956,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div id="app" data-icons-uri="${iconsUri}"></div>
+    <script nonce="${nonce}" src="${bridgeUri}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-    }
-    private async _handleDebug(event: string, data: unknown): Promise<void> {
-        const timestamp = new Date().toISOString();
-        const payload = JSON.stringify(data);
-        const line = `[${timestamp}] [PI-DEBUG] ${event} ${payload}`;
-
-        this._outputChannel.appendLine(line);
-
-        try {
-            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (wsRoot) {
-                const debugDir = path.join(wsRoot, '.vscode');
-                await vscode.workspace.fs.createDirectory(vscode.Uri.file(debugDir));
-                const logPath = path.join(debugDir, 'interaction-debug.log');
-                const fs = await import('fs');
-                fs.appendFileSync(logPath, line + '\n');
-            }
-        } catch {
-            // silently ignore file write failures
-        }
     }
 }
 

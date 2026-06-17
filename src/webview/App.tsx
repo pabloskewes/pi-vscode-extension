@@ -417,12 +417,12 @@ export default function App(): ReactNode {
     if (!input) return;
 
     const dt = event.dataTransfer;
-    vscode.postMessage({ type: '__debug', event: 'drop', data: {
+    console.log('[PI-DEBUG] drop', {
       types: dt?.types ? Array.from(dt.types) : [],
       fileCount: dt?.files?.length ?? 0,
       uriList: dt?.getData('text/uri-list')?.substring(0, 500),
       plain: dt?.getData('text/plain')?.substring(0, 200),
-    } });
+    });
 
     if (dt?.files) {
       for (let i = 0; i < dt.files.length; i++) {
@@ -446,11 +446,11 @@ export default function App(): ReactNode {
 
     const paths = collectDropPaths(event);
     if (paths.length === 0) {
-      vscode.postMessage({ type: '__debug', event: 'drop-no-paths', data: {} });
+      console.log('[PI-DEBUG] drop-no-paths', {});
       return;
     }
 
-    vscode.postMessage({ type: '__debug', event: 'drop-paths', data: { paths } });
+    console.log('[PI-DEBUG] drop-paths', { paths });
 
     void resolveDroppedFiles(paths).then((resolvedItems) => {
       const currentInput = inputRef.current;
@@ -474,13 +474,13 @@ export default function App(): ReactNode {
     const items = event.clipboardData?.items;
     let handledImage = false;
 
-    vscode.postMessage({ type: '__debug', event: 'paste', data: {
+    console.log('[PI-DEBUG] paste', {
       types: event.clipboardData?.types ? Array.from(event.clipboardData.types) : [],
       textPlain: event.clipboardData?.getData('text/plain')?.substring(0, 200),
       textHtml: event.clipboardData?.getData('text/html')?.substring(0, 200),
       fileRefs: event.clipboardData?.getData(FILE_REFS_MIME),
       itemCount: items?.length ?? 0,
-    } });
+    });
 
     if (items) {
       for (let index = 0; index < items.length; index++) {
@@ -556,10 +556,10 @@ export default function App(): ReactNode {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || !input) return;
 
-    vscode.postMessage({ type: '__debug', event: 'composer-copy', data: {
+    console.log('[PI-DEBUG] composer-copy', {
       hasSelection: selection.rangeCount > 0,
       anchorInInput: !!input.contains(selection.anchorNode),
-    } });
+    });
 
     const range = selection.getRangeAt(0);
     const isSelectingAll =
@@ -971,11 +971,11 @@ export default function App(): ReactNode {
       if (inputRef.current?.contains(anchorNode)) return;
       if (!messages.contains(anchorNode)) return;
 
-      vscode.postMessage({ type: '__debug', event: 'document-copy', data: { hasSelection: selection.rangeCount > 0 } });
+      console.log('[PI-DEBUG] document-copy', { hasSelection: selection.rangeCount > 0 });
 
       if (serializeSelectionWithChips(messages, event.clipboardData)) {
         event.preventDefault();
-        vscode.postMessage({ type: '__debug', event: 'document-copy-custom-clipboard', data: {} });
+        console.log('[PI-DEBUG] document-copy-custom-clipboard', {});
       }
     };
 

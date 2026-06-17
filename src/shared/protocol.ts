@@ -158,6 +158,26 @@ export interface ResolvedFileReference {
     file: FileReferenceInfo | null;
 }
 
+export interface DebugBridgeLogEntry {
+    seq: number;
+    timestamp: number;
+    level: 'log' | 'info' | 'warn' | 'error';
+    text: string;
+    args: unknown[];
+}
+
+export type DebugBridgeRequest =
+    | { kind: 'evaluate'; requestId: string; code: string }
+    | { kind: 'simulateDrop'; requestId: string; path: string; selector?: string };
+
+export type DebugBridgeClientEvent =
+    | { kind: 'ready'; href: string; title: string }
+    | { kind: 'log'; level: DebugBridgeLogEntry['level']; args: unknown[]; timestamp: number }
+    | { kind: 'pageError'; message: string; stack?: string; source?: string; lineno?: number; colno?: number; timestamp: number }
+    | { kind: 'unhandledRejection'; reason: unknown; timestamp: number }
+    | { kind: 'response'; requestId: string; ok: true; result: unknown }
+    | { kind: 'response'; requestId: string; ok: false; error: { message: string; stack?: string } };
+
 // Webview -> Extension messages
 export type ClientMessage =
     | { type: 'prompt'; text: string; images?: string[]; files?: FileReferenceInfo[] }
@@ -193,7 +213,7 @@ export type ClientMessage =
     | { type: 'cancelQueue' }
     | { type: 'requestUsage' }
     | { type: 'refreshUsage' }
-    | { type: '__debug'; event: string; data: unknown };
+    | { type: '__debugBridge'; message: DebugBridgeClientEvent };
 
 // Settings webview -> Extension messages
 export type SettingsClientMessage =
@@ -221,6 +241,7 @@ export type ServerMessage =
     | { type: 'resolvedFileReferences'; requestId: string; items: ResolvedFileReference[] }
     | { type: 'resolvedDroppedFiles'; requestId: string; items: ResolvedFileReference[] }
     | { type: 'usageUpdate'; usage: UsageSnapshotDTO }
+    | { type: '__debugBridgeRequest'; request: DebugBridgeRequest }
     | { type: 'error'; message: string };
 
 // Extension -> Settings webview messages
