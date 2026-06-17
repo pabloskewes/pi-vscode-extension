@@ -147,6 +147,7 @@ export interface SessionInfo {
 
 export interface FileReferenceInfo {
     relativePath: string;
+    absolutePath?: string;
     displayName: string;
     insertOffset?: number;
 }

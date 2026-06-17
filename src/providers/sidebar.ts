@@ -84,7 +84,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _usageBridge: UsageBridge;
-    private _workspaceFilesCache: string[] | undefined;
+    private _workspaceFilesCache: FileReferenceInfo[] | undefined;
 
     constructor(
         extensionUri: vscode.Uri,
@@ -579,20 +579,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const normalizedQuery = query.trim().toLowerCase();
         const files = await this._getWorkspaceFiles();
         const ranked = files
-            .filter((relativePath) => {
+            .filter((file) => {
                 if (!normalizedQuery) return true;
-                return relativePath.toLowerCase().includes(normalizedQuery);
+                return file.relativePath.toLowerCase().includes(normalizedQuery)
+                    || file.displayName.toLowerCase().includes(normalizedQuery);
             })
-            .sort((a, b) => this._compareFileMatches(a, b, normalizedQuery))
+            .sort((a, b) => this._compareFileMatches(a.relativePath, b.relativePath, normalizedQuery))
             .slice(0, FILE_SEARCH_RESULT_LIMIT);
 
-        return ranked.map((relativePath) => ({
-            relativePath,
-            displayName: relativePath.split('/').pop() ?? relativePath,
-        }));
+        return ranked;
     }
 
-    private async _getWorkspaceFiles(): Promise<string[]> {
+    private async _getWorkspaceFiles(): Promise<FileReferenceInfo[]> {
         if (this._workspaceFilesCache) {
             return this._workspaceFilesCache;
         }
@@ -600,9 +598,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const excludes = '**/{.git,node_modules,dist,out,coverage,.next,.turbo,build}/**';
         const uris = await vscode.workspace.findFiles('**/*', excludes, 2000);
         this._workspaceFilesCache = uris
-            .map((uri) => vscode.workspace.asRelativePath(uri, false))
-            .filter((relativePath) => relativePath.length > 0)
-            .sort((a, b) => a.localeCompare(b));
+            .map((uri) => {
+                const relativePath = vscode.workspace.asRelativePath(uri, false);
+                return {
+                    relativePath,
+                    absolutePath: uri.fsPath,
+                    displayName: relativePath.split('/').pop() ?? relativePath,
+                };
+            })
+            .filter((file) => file.relativePath.length > 0)
+            .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
         return this._workspaceFilesCache;
     }
 
@@ -631,16 +636,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             return text;
         }
 
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!root) {
+        const sections: string[] = [];
+        let totalChars = 0;
+        const promptFiles = files
+            .map((file) => {
+                const uri = this._resolveFileReference(file);
+                return uri ? { ...file, absolutePath: uri.fsPath } : undefined;
+            })
+            .filter((file): file is FileReferenceInfo & { absolutePath: string } => !!file);
+
+        if (!promptFiles.length) {
             return text;
         }
 
-        const sections: string[] = [];
-        let totalChars = 0;
-
-        for (const file of files.slice(0, FILE_CONTEXT_MAX_FILES)) {
-            const uri = vscode.Uri.joinPath(vscode.Uri.file(root), file.relativePath);
+        for (const file of promptFiles.slice(0, FILE_CONTEXT_MAX_FILES)) {
+            const uri = vscode.Uri.file(file.absolutePath);
             try {
                 const bytes = await vscode.workspace.fs.readFile(uri);
                 let content = new TextDecoder().decode(bytes);
@@ -662,14 +672,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 }
 
                 totalChars += content.length;
-                sections.push(`<file path="${this._escapeXmlAttribute(file.relativePath)}">\n${content}${note}\n</file>`);
+                sections.push(`<file path="${this._escapeXmlAttribute(file.absolutePath)}">\n${content}${note}\n</file>`);
             } catch {
-                sections.push(`<file path="${this._escapeXmlAttribute(file.relativePath)}">\n[unreadable or missing at send time]\n</file>`);
+                sections.push(`<file path="${this._escapeXmlAttribute(file.absolutePath)}">\n[unreadable or missing at send time]\n</file>`);
             }
         }
 
         const fileContext = `Attached file context:\n\n${sections.join('\n\n')}`;
-        const userRequest = this._insertFileMarkers(text, files);
+        const userRequest = this._insertFileMarkers(text, promptFiles);
         return userRequest.trim()
             ? `${userRequest}\n\n${fileContext}`
             : fileContext;
@@ -690,7 +700,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         for (const file of positionedFiles) {
             const insertOffset = file.insertOffset ?? 0;
             result += text.slice(textOffset, insertOffset);
-            const marker = `@${file.relativePath}`;
+            const marker = `[[file:${file.absolutePath ?? file.relativePath}]]`;
             const needsLeadingSpace = result.length > 0 && !/\s$/.test(result);
             const needsTrailingSpace = !!text[insertOffset] && !/^\s/.test(text.slice(insertOffset, insertOffset + 1));
             result += `${needsLeadingSpace ? ' ' : ''}${marker}${needsTrailingSpace ? ' ' : ''}`;
@@ -698,6 +708,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
         result += text.slice(textOffset);
         return result;
+    }
+
+    private _resolveFileReference(file: FileReferenceInfo): vscode.Uri | undefined {
+        if (file.absolutePath) {
+            return vscode.Uri.file(file.absolutePath);
+        }
+
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) {
+            return undefined;
+        }
+        return vscode.Uri.joinPath(vscode.Uri.file(root), file.relativePath);
     }
 
     private _escapeXmlAttribute(value: string): string {

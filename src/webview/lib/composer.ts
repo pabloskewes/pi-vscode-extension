@@ -14,11 +14,13 @@ export function getComposerPayload(input: HTMLElement | null): ComposerPayload {
   const files: FileReferenceInfo[] = [];
 
   for (const file of raw.files) {
-    if (seen.has(file.relativePath)) continue;
-    seen.add(file.relativePath);
+    const dedupeKey = file.absolutePath ?? file.relativePath;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     const rawOffset = file.insertOffset ?? 0;
     files.push({
       relativePath: file.relativePath,
+      absolutePath: file.absolutePath,
       displayName: file.displayName,
       insertOffset: Math.max(0, Math.min(text.length, rawOffset - leadingTrim)),
     });
@@ -45,6 +47,7 @@ export function readComposerContent(root: Node): ComposerContent {
     if (isComposerFileChip(node)) {
       files.push({
         relativePath: node.dataset.filePath ?? '',
+        absolutePath: node.dataset.absolutePath,
         displayName: node.dataset.fileName ?? node.dataset.filePath ?? '',
         insertOffset: text.length,
       });
@@ -234,6 +237,9 @@ export function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
   chip.className = 'attachment-chip attachment-chip-file attachment-chip-inline';
   chip.contentEditable = 'false';
   chip.dataset.filePath = file.relativePath;
+  if (file.absolutePath) {
+    chip.dataset.absolutePath = file.absolutePath;
+  }
   chip.dataset.fileName = file.displayName;
   chip.title = file.relativePath;
   chip.innerHTML = `

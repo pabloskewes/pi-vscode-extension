@@ -199,16 +199,21 @@ export function extractFileReferences(fileBlock: string, pattern: RegExp): FileR
   const seen = new Set<string>();
   const files: FileReferenceInfo[] = [];
 
-  for (const relativePath of paths) {
-    if (seen.has(relativePath)) continue;
-    seen.add(relativePath);
+  for (const path of paths) {
+    if (seen.has(path)) continue;
+    seen.add(path);
     files.push({
-      relativePath,
-      displayName: relativePath.split('/').pop() ?? relativePath,
+      relativePath: path,
+      absolutePath: isAbsolutePath(path) ? path : undefined,
+      displayName: path.split('/').pop() ?? path,
     });
   }
 
   return files;
+}
+
+export function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
 }
 
 export function unescapeHtmlEntities(value: string): string {
@@ -226,8 +231,21 @@ export function stripInlineFileMarkers(
   const normalizedFiles: FileReferenceInfo[] = [];
 
   for (const file of files) {
-    const marker = `@${file.relativePath}`;
-    const markerIndex = remaining.indexOf(marker);
+    const markers = [
+      `[[file:${file.absolutePath ?? file.relativePath}]]`,
+      `[[file:${file.relativePath}]]`,
+      `@${file.relativePath}`,
+    ];
+    let marker = '';
+    let markerIndex = -1;
+    for (const candidate of markers) {
+      const candidateIndex = remaining.indexOf(candidate);
+      if (candidateIndex !== -1) {
+        marker = candidate;
+        markerIndex = candidateIndex;
+        break;
+      }
+    }
     if (markerIndex === -1) {
       normalizedFiles.push(file);
       continue;
@@ -258,7 +276,11 @@ export function normalizeInlineFileDisplay(
     return { text, files };
   }
 
-  const hasInlineMarkers = files.some((file) => text.includes(`@${file.relativePath}`));
+  const hasInlineMarkers = files.some((file) =>
+    text.includes(`@${file.relativePath}`) ||
+    text.includes(`[[file:${file.relativePath}]]`) ||
+    (file.absolutePath ? text.includes(`[[file:${file.absolutePath}]]`) : false)
+  );
   const hasExplicitOffsets = files.some((file) => typeof file.insertOffset === 'number');
   if (!hasInlineMarkers && hasExplicitOffsets) {
     return { text, files };
