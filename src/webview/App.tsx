@@ -961,6 +961,7 @@ export default function App(): ReactNode {
     vscode.postMessage({ type: 'getState' });
     vscode.postMessage({ type: 'getSkills' });
     vscode.postMessage({ type: 'requestUsage' });
+    vscode.postMessage({ type: 'getSessionsSnapshot' });
   }, []);
 
   useEffect(() => {
@@ -995,6 +996,7 @@ export default function App(): ReactNode {
           vscode.postMessage({ type: 'getState' });
           vscode.postMessage({ type: 'getSkills' });
           vscode.postMessage({ type: 'requestUsage' });
+          vscode.postMessage({ type: 'getSessionsSnapshot' });
           break;
 
         case 'stateSync': {
@@ -1066,6 +1068,11 @@ export default function App(): ReactNode {
           setSessions(message.sessions);
           setCurrentSessionId(message.currentSessionId);
           setSessionPanelOpen(true);
+          break;
+
+        case 'sessionsSnapshot':
+          setSessions(message.sessions);
+          setCurrentSessionId(message.currentSessionId);
           break;
 
         case 'fileChange':
@@ -1204,6 +1211,12 @@ export default function App(): ReactNode {
     setUserHasScrolled(false);
     window.requestAnimationFrame(() => scrollToBottom(true));
   }, [state.activeTabId]);
+
+  useEffect(() => {
+    if (state.messages.length === 0 && !state.isStreaming) {
+      vscode.postMessage({ type: 'getSessionsSnapshot' });
+    }
+  }, [state.messages.length, state.isStreaming, state.activeTabId]);
 
   useEffect(() => {
     return () => {
@@ -1358,6 +1371,9 @@ export default function App(): ReactNode {
         toolApprovals={toolApprovals}
         errors={errors}
         expandedUserMessages={expandedUserMessages}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        sessionPanelOpen={sessionPanelOpen}
         messagesRef={messagesRef}
         onScroll={(event) => {
           if (isProgrammaticScrollRef.current) {
@@ -1380,6 +1396,9 @@ export default function App(): ReactNode {
         onOpenFile={openFile}
         onApproveToolCall={handleApproveToolCall}
         onRejectToolCall={handleRejectToolCall}
+        onLoadSession={(sessionPath) => vscode.postMessage({ type: 'loadSession', sessionPath })}
+        onOpenSessions={() => vscode.postMessage({ type: 'getSessions' })}
+        onNewSession={() => vscode.postMessage({ type: 'newSession' })}
         historyCallbacks={historyCallbacks}
       />
 

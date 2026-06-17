@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import type { Model } from '@earendil-works/pi-ai';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage } from './auth';
@@ -180,8 +181,68 @@ export class PiSessionManager {
             id: s.id ?? s.sessionId ?? '',
             name: s.name ?? s.sessionName,
             path: s.path ?? s.filePath ?? '',
-            lastModified: s.lastModified ?? s.modifiedAt,
+            created: normalizeTimestamp(s.created),
+            lastModified: normalizeTimestamp(s.lastModified ?? s.modifiedAt ?? s.modified),
+            messageCount: typeof s.messageCount === 'number' ? s.messageCount : undefined,
+            firstMessage: typeof s.firstMessage === 'string' ? s.firstMessage : undefined,
         }));
+    }
+
+    async generateSessionName(modelSetting: string): Promise<string | undefined> {
+        if (!this._session || !this._sessionManager) {
+            this._outputChannel.appendLine('[naming] skipped: no session or sessionManager');
+            return undefined;
+        }
+
+        const currentName = this._session.sessionName?.trim();
+        const sessionId = this._session.sessionId;
+        if (currentName && currentName !== sessionId) {
+            this._outputChannel.appendLine(`[naming] skipped: already has name "${currentName}"`);
+            return currentName;
+        }
+
+        const { firstUserText, firstAssistantText } = getFirstTurnTexts(this.getMessages());
+        if (!firstUserText || !firstAssistantText) {
+            this._outputChannel.appendLine('[naming] skipped: no messages yet');
+            return undefined;
+        }
+
+        const registry = this._modelRegistry ?? await getModelRegistry();
+        const selectedModel = resolveNamingModel(registry, modelSetting) ?? this._session.model;
+        if (!selectedModel) {
+            this._outputChannel.appendLine('[naming] skipped: no model resolved');
+            return undefined;
+        }
+
+        this._outputChannel.appendLine(`[naming] using model: ${String(selectedModel.provider)}/${selectedModel.id}`);
+
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+
+        const { session: namingSession } = await createAgentSession({
+            cwd,
+            authStorage: await getAuthStorage(),
+            modelRegistry: registry,
+            sessionManager: SM.inMemory(cwd),
+            noTools: 'all',
+        });
+
+        try {
+            await namingSession.setModel(selectedModel);
+            await namingSession.prompt(buildNamingPrompt(firstUserText, firstAssistantText));
+            const rawTitle = extractLastAssistantText(namingSession.messages);
+            const title = sanitizeGeneratedTitle(rawTitle);
+            if (!title) {
+                this._outputChannel.appendLine(`[naming] empty title from model (raw: "${rawTitle}")`);
+                return undefined;
+            }
+
+            this._outputChannel.appendLine(`[naming] persisting title: "${title}"`);
+            this._sessionManager.appendSessionInfo(title);
+            return title;
+        } finally {
+            namingSession.dispose();
+        }
     }
 
     async loadSession(sessionPath: string): Promise<void> {
@@ -419,6 +480,131 @@ function dataUrlToImageContent(dataUrl: string): { type: string; data: string; m
     const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
     if (!match) return null;
     return { type: 'image', data: match[2], mimeType: match[1] };
+}
+
+function normalizeTimestamp(value: unknown): number | undefined {
+    if (!value) {
+        return undefined;
+    }
+    if (value instanceof Date) {
+        return value.getTime();
+    }
+    if (typeof value === 'number') {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? undefined : parsed;
+    }
+    return undefined;
+}
+
+function getFirstTurnTexts(messages: any[]): { firstUserText: string; firstAssistantText: string } {
+    const firstUser = messages.find((message) => message?.role === 'user');
+    const firstAssistant = messages.find((message) => message?.role === 'assistant');
+    return {
+        firstUserText: extractMessageText(firstUser),
+        firstAssistantText: extractMessageText(firstAssistant),
+    };
+}
+
+function extractMessageText(message: any): string {
+    if (!message) {
+        return '';
+    }
+
+    if (typeof message.content === 'string') {
+        return message.content;
+    }
+
+    if (Array.isArray(message.content)) {
+        return message.content
+            .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
+            .map((item: any) => item.text)
+            .join(' ')
+            .trim();
+    }
+
+    if (typeof message.text === 'string') {
+        return message.text;
+    }
+
+    return '';
+}
+
+function resolveNamingModel(registry: ModelRegistry, setting: string): Model<any> | undefined {
+    const configured = setting.trim();
+    const available = registry.getAvailable();
+    if (available.length === 0) {
+        return undefined;
+    }
+
+    if (configured.includes('/')) {
+        const slash = configured.indexOf('/');
+        const provider = configured.slice(0, slash).trim();
+        const modelId = configured.slice(slash + 1).trim();
+        if (provider && modelId) {
+            return registry.find(provider, modelId) ?? available.find((model) => model.id === modelId);
+        }
+    }
+
+    if (configured) {
+        const exactMatches = available.filter((model) => model.id === configured);
+        if (exactMatches.length === 1) {
+            return exactMatches[0];
+        }
+        if (exactMatches.length > 1) {
+            return exactMatches.find((model) => String(model.provider) === 'deepseek') ?? exactMatches[0];
+        }
+        const byName = available.find((model) => model.name === configured);
+        if (byName) {
+            return byName;
+        }
+    }
+
+    return available.find((model) => String(model.provider) === 'deepseek') ?? available[0];
+}
+
+function buildNamingPrompt(firstUserText: string, firstAssistantText: string): string {
+    return [
+        'Generate a concise chat title in English.',
+        '',
+        'Rules:',
+        '- 3 to 6 words',
+        '- no quotes',
+        '- no trailing period',
+        '- capture the actual engineering task',
+        '',
+        `First user message: ${firstUserText}`,
+        `First assistant response: ${firstAssistantText}`,
+        '',
+        'Title:',
+    ].join('\n');
+}
+
+function extractLastAssistantText(messages: any[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]?.role !== 'assistant') {
+            continue;
+        }
+        return extractMessageText(messages[i]);
+    }
+    return '';
+}
+
+function sanitizeGeneratedTitle(raw: string): string {
+    const firstLine = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? '';
+
+    if (!firstLine) {
+        return '';
+    }
+
+    const unquoted = firstLine.replace(/^['"`]+|['"`]+$/g, '');
+    const noPeriod = unquoted.replace(/[.]+$/g, '');
+    return noPeriod.slice(0, 72).trim();
 }
 
 function safeSerialize(obj: any): any {

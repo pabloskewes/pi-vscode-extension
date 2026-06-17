@@ -82,6 +82,8 @@ function render(data: SettingsData): void {
             'Automatically persist sessions after each turn.'),
         buildTextInput('sessionStoragePath', 'Session Storage Path', data.sessionStoragePath,
             'Custom path for session data. Leave empty for the default workspace .pi/ directory.'),
+        buildTextInput('sessionNamingModel', 'Session Naming Model', data.sessionNamingModel,
+            'Model ID used for auto-generated chat titles (e.g. deepseek-v4-flash).'),
         buildRange('contextUsageWarningThreshold', 'Context Usage Warning', data.contextUsageWarningThreshold, 0, 100,
             `Warn when context usage exceeds ${data.contextUsageWarningThreshold}% of the context window.`),
         buildSelect('completionSound', 'Completion Sound', data.completionSound, [

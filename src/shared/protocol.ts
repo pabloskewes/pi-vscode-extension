@@ -19,6 +19,7 @@ export interface SettingsData {
     sessionStoragePath: string;
     contextUsageWarningThreshold: number;
     completionSound: CompletionSound;
+    sessionNamingModel: string;
 }
 
 export interface ToolCallPendingInfo {
@@ -146,7 +147,10 @@ export interface SessionInfo {
     id: string;
     name?: string;
     path: string;
+    created?: number;
     lastModified?: number;
+    messageCount?: number;
+    firstMessage?: string;
 }
 
 export interface FileReferenceInfo {
@@ -194,6 +198,7 @@ export type ClientMessage =
     | { type: 'newSession' }
     | { type: 'loadSession'; sessionPath: string }
     | { type: 'getSessions' }
+    | { type: 'getSessionsSnapshot' }
     | { type: 'getState' }
     | { type: 'approveToolCall'; toolCallId: string }
     | { type: 'rejectToolCall'; toolCallId: string }
@@ -235,6 +240,7 @@ export type ServerMessage =
     | { type: 'models'; models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: string }
     | { type: 'modelChanged'; model: ModelInfo; thinkingLevel?: string }
     | { type: 'sessions'; sessions: SessionInfo[]; currentSessionId?: string }
+    | { type: 'sessionsSnapshot'; sessions: SessionInfo[]; currentSessionId?: string }
     | { type: 'sessionChanged'; sessionId: string }
     | { type: 'fileChange'; change: FileChangeInfo }
     | { type: 'confirmResult'; action: string; confirmed: boolean; payload?: any }

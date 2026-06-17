@@ -147,6 +147,11 @@
           ],
           "description": "Sound played when the agent finishes generating a response"
         },
+        "pi-agent.sessionNamingModel": {
+          "type": "string",
+          "default": "deepseek-v4-flash",
+          "description": "Model ID used to auto-generate chat titles (e.g. deepseek-v4-flash)"
+        },
         "pi-agent.usageWidget.enabled": {
           "type": "string",
           "default": "auto",

@@ -113,6 +113,7 @@ export class SettingsPanel {
             sessionStoragePath: config.get<string>('sessionStoragePath', ''),
             contextUsageWarningThreshold: config.get<number>('contextUsageWarningThreshold', 80),
             completionSound: config.get<'off' | 'chime' | 'subtle'>('completionSound', 'off'),
+            sessionNamingModel: config.get<string>('sessionNamingModel', 'deepseek-v4-flash'),
         };
 
         this._post({ type: 'settings', data });

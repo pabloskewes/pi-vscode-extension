@@ -1,13 +1,13 @@
 import type { MutableRefObject, ReactNode } from 'react';
-import type { ToolCallPendingInfo } from '../../../shared/protocol';
+import type { SessionInfo, ToolCallPendingInfo } from '../../../shared/protocol';
 import { isRunningStreamingItem } from '../../lib/streaming';
 import type { StreamingItem, WebviewState } from '../../types';
 import { buildHistoryNodes, HistoryCallbacks } from '../../lib/messages';
 import StreamingItems from './StreamingItems';
 import ThinkingBlock from './ThinkingBlock';
 import ToolApprovalCard from './ToolApprovalCard';
-import WelcomeMessage from './WelcomeMessage';
 import { renderMarkdown } from '../../lib/markdown';
+import HomeScreen from './HomeScreen';
 
 interface MessagesProps {
   state: WebviewState;
@@ -15,6 +15,9 @@ interface MessagesProps {
   toolApprovals: ToolCallPendingInfo[];
   errors: Array<{ id: number; message: string }>;
   expandedUserMessages: Record<number, boolean>;
+  sessions: SessionInfo[];
+  currentSessionId?: string;
+  sessionPanelOpen?: boolean;
   messagesRef: MutableRefObject<HTMLDivElement | null>;
   onScroll: (event: React.UIEvent<HTMLDivElement>) => void;
   onWheel: (event: React.WheelEvent<HTMLDivElement>) => void;
@@ -26,6 +29,9 @@ interface MessagesProps {
   onOpenFile: (filePath: string) => void;
   onApproveToolCall: (toolCallId: string) => void;
   onRejectToolCall: (toolCallId: string) => void;
+  onLoadSession: (sessionPath: string) => void;
+  onOpenSessions: () => void;
+  onNewSession: () => void;
   historyCallbacks: HistoryCallbacks;
 }
 
@@ -35,6 +41,9 @@ export default function Messages({
   toolApprovals,
   errors,
   expandedUserMessages,
+  sessions,
+  currentSessionId,
+  sessionPanelOpen,
   messagesRef,
   onScroll,
   onWheel,
@@ -46,6 +55,9 @@ export default function Messages({
   onOpenFile,
   onApproveToolCall,
   onRejectToolCall,
+  onLoadSession,
+  onOpenSessions,
+  onNewSession,
   historyCallbacks,
 }: MessagesProps): ReactNode {
   const historyNodes = buildHistoryNodes(state, expandedUserMessages, historyCallbacks);
@@ -68,7 +80,16 @@ export default function Messages({
       onTouchStart={onTouchStart}
       onScroll={onScroll}
     >
-      {historyNodes.length === 0 && !state.isStreaming ? <WelcomeMessage /> : historyNodes}
+      {historyNodes.length === 0 && !state.isStreaming ? (
+        <HomeScreen
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          onLoadSession={onLoadSession}
+          onOpenSessions={onOpenSessions}
+          onNewSession={onNewSession}
+          sessionPanelOpen={sessionPanelOpen}
+        />
+      ) : historyNodes}
 
       {errors.map((error) => (
         <div className="error-message" key={error.id}>

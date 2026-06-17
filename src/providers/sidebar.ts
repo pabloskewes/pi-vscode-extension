@@ -41,6 +41,7 @@ interface TabState {
     queuedMessages: string[];
     isStreaming: boolean;
     userPromptDisplay: Map<number, { text: string; files: FileReferenceInfo[] }>;
+    namingInProgress: boolean;
 }
 
 let tabIdCounter = 0;
@@ -74,6 +75,7 @@ function makeTabState(
         queuedMessages: [],
         isStreaming: false,
         userPromptDisplay: new Map(),
+        namingInProgress: false,
     };
 }
 
@@ -101,8 +103,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._usageBridge = new UsageBridge(outputChannel);
 
         const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('pi-agent.completionSound')) {
+            if (
+                e.affectsConfiguration('pi-agent.completionSound') ||
+                e.affectsConfiguration('pi-agent.sessionNamingModel')
+            ) {
                 this.sendStateSync();
+                void this._sendSessionsSnapshot();
             }
         });
         this._tabSubscriptions.set('__config', [() => configListener.dispose()]);
@@ -152,6 +158,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this._post({ type: 'ready' });
         this.sendStateSync();
+        void this._sendSessionsSnapshot();
     }
 
     private _subscribeTab(tab: TabState): void {
@@ -252,6 +259,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 tab.diffManager.setCurrentTurn(turnIdx);
                 tab.session.followUp(text);
             }
+
+            if (tab.turnCounter === 1) {
+                const sessionName = tab.session.session?.sessionName?.trim();
+                const sessionId = tab.session.session?.sessionId;
+                const hasUsefulName = !!sessionName && sessionName !== sessionId;
+                if (!hasUsefulName && !tab.namingInProgress) {
+                    tab.namingInProgress = true;
+                    void this._generateSessionName(tab);
+                }
+            }
         }
 
         if (event.type === 'message_update' && event.assistantMessageEvent) {
@@ -289,12 +306,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 event.type === 'agent_start' ||
                 event.type === 'agent_end' ||
                 event.type === 'message_end' ||
-                event.type === 'turn_end'
+                event.type === 'turn_end' ||
+                event.type === 'session_info_changed'
             ) {
                 this.sendStateSync();
+                void this._sendSessionsSnapshot();
             }
         } else if (event.type === 'agent_start' || event.type === 'agent_end') {
             this.sendStateSync();
+            void this._sendSessionsSnapshot();
         }
     }
 
@@ -334,6 +354,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const completionSound = config.get<CompletionSound>('completionSound', 'off');
         state.completionSound = completionSound;
 
+        void this._tryAutoNameIfNeeded(tab);
+
         let assistantOrdinal = 0;
         let userOrdinal = 0;
         for (let i = 0; i < state.messages.length; i++) {
@@ -369,6 +391,59 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private _post(message: ServerMessage): void {
         this._view?.webview.postMessage(message);
+    }
+
+    private async _sendSessionsSnapshot(): Promise<void> {
+        const tab = this._activeTab;
+        if (!tab) return;
+        const sessions = await tab.session.getSessions();
+        this._post({
+            type: 'sessionsSnapshot',
+            sessions,
+            currentSessionId: tab.session.session?.sessionId,
+        });
+    }
+
+    private async _generateSessionName(tab: TabState): Promise<void> {
+        try {
+            const config = vscode.workspace.getConfiguration('pi-agent');
+            const modelSetting = config.get<string>('sessionNamingModel', 'deepseek-v4-flash');
+            this._outputChannel.appendLine(`[naming] generating session name (model: ${modelSetting})...`);
+            const generatedName = await tab.session.generateSessionName(modelSetting);
+            if (!generatedName) {
+                this._outputChannel.appendLine('[naming] no name generated');
+                return;
+            }
+
+            this._outputChannel.appendLine(`[naming] generated: "${generatedName}"`);
+            this._updateTabName(tab);
+            if (tab.id === this._activeTabId) {
+                this.sendStateSync();
+            }
+            await this._sendSessionsSnapshot();
+        } catch (err: any) {
+            this._outputChannel.appendLine(`[naming] failed: ${err?.message ?? String(err)}`);
+        } finally {
+            tab.namingInProgress = false;
+        }
+    }
+
+    private async _tryAutoNameIfNeeded(tab: TabState): Promise<void> {
+        if (tab.namingInProgress) return;
+        if (tab.isStreaming) return;
+
+        const session = tab.session.session;
+        if (!session) return;
+
+        const messages = tab.session.getMessages();
+        if (!messages || messages.length === 0) return;
+
+        const sessionName = session.sessionName?.trim();
+        const sessionId = session.sessionId;
+        if (sessionName && sessionName !== sessionId && sessionName !== 'New Agent') return;
+
+        tab.namingInProgress = true;
+        void this._generateSessionName(tab);
     }
 
     private async _handleMessage(msg: ClientMessage): Promise<void> {
@@ -452,8 +527,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.messageMeta.clear();
                     tab.userPromptDisplay.clear();
                     tab.queuedMessages = [];
+                    tab.namingInProgress = false;
                     this._usageBridge.attach(tab.session.session);
                     this.sendStateSync();
+                    await this._sendSessionsSnapshot();
                     break;
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
@@ -471,9 +548,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.messageMeta.clear();
                     tab.userPromptDisplay.clear();
                     tab.queuedMessages = [];
+                    tab.namingInProgress = false;
                     this._updateTabName(tab);
                     this._usageBridge.attach(tab.session.session);
                     this.sendStateSync();
+                    await this._sendSessionsSnapshot();
                     break;
                 case 'getSessions': {
                     const sessions = await tab.session.getSessions();
@@ -481,6 +560,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     this._post({ type: 'sessions', sessions, currentSessionId: currentId });
                     break;
                 }
+                case 'getSessionsSnapshot':
+                    await this._sendSessionsSnapshot();
+                    break;
                 case 'getState':
                     this.sendStateSync();
                     break;
@@ -891,6 +973,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this._activeTabId = id;
         this.sendStateSync();
+        await this._sendSessionsSnapshot();
     }
 
     private async _closeTab(tabId: string): Promise<void> {
@@ -912,6 +995,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
 
         this.sendStateSync();
+        await this._sendSessionsSnapshot();
     }
 
     private _switchTab(tabId: string): void {
@@ -926,6 +1010,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._usageBridge.attach(tab.session.session);
 
         this.sendStateSync();
+        void this._sendSessionsSnapshot();
     }
 
     private _findCutoffIndex(messages: any[], rollbackPoint: number): number {

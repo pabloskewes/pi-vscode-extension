@@ -1268,8 +1268,94 @@ body {
     background: rgba(255,255,255,0.06);
     border-left-color: var(--btn-bg);
 }
-.session-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-item-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-item-meta {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
+}
 .session-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 12px; }
+
+/* ── Home screen ── */
+.home-screen {
+    margin: 0 0 10px 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card-bg);
+}
+
+.home-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.home-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.home-title-icon {
+    opacity: 0.65;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.home-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.home-new-session-btn,
+.home-see-all {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+}
+
+.home-new-session-btn:hover,
+.home-see-all:hover {
+    border-color: var(--btn-bg);
+}
+
+.home-subtitle {
+    color: var(--muted);
+    font-size: 11px;
+    margin: 2px 0 6px;
+}
+
+.home-session-list {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+}
+
+.home-empty {
+    color: var(--muted);
+    font-size: 12px;
+    padding: 6px 0 2px;
+}
+
+.home-see-all {
+    margin-top: 8px;
+}
 
 /* ── Inline diff cards ── */
 .diff-card {
