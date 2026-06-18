@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { buildInlineFileMarker } from '../../shared/file-markers';
 import type { FileChangeInfo, FileReferenceInfo } from '../../shared/protocol';
 import { USER_MESSAGE_COLLAPSE_CHAR_LIMIT, USER_MESSAGE_COLLAPSE_LINE_LIMIT } from '../constants';
 import type { ChatMessage, WebviewState } from '../types';
@@ -164,29 +165,14 @@ export function extractUserPromptDisplay(text: string): {
   userText: string;
   files: FileReferenceInfo[];
 } {
-  const legacyPrefix = 'Attached file context:\n\n';
-  const legacySeparator = '\n\nUser request:\n';
-  if (text.startsWith(legacyPrefix)) {
-    const separatorIndex = text.indexOf(legacySeparator);
-    if (separatorIndex !== -1) {
-      const fileBlock = text.slice(legacyPrefix.length, separatorIndex);
-      const userText = text.slice(separatorIndex + legacySeparator.length);
-      return {
-        userText,
-        files: extractFileReferences(fileBlock, /^BEGIN FILE: (.+)$/gm),
-      };
-    }
-  }
-
-  const suffixMarker = '\n\nAttached file context:\n\n';
-  const suffixIndex = text.lastIndexOf(suffixMarker);
-  if (suffixIndex === -1) {
+  const fileBlockIndex = text.search(/(?:^|\n\n)<file\s+name="/);
+  if (fileBlockIndex === -1) {
     return { userText: text, files: [] };
   }
 
-  const userText = text.slice(0, suffixIndex);
-  const fileBlock = text.slice(suffixIndex + suffixMarker.length);
-  const files = extractFileReferences(fileBlock, /<file path="([^"]+)">/gm);
+  const userText = text.slice(0, fileBlockIndex).replace(/\n\n$/, '');
+  const fileBlock = text.slice(fileBlockIndex).trimStart();
+  const files = extractFileReferences(fileBlock, /<file\s+name="([^"]+)"(?:\s+lines="([^"]+)")?[^>]*>/gm);
   const normalized = stripInlineFileMarkers(userText, files);
   return {
     userText: normalized.text,
@@ -195,17 +181,30 @@ export function extractUserPromptDisplay(text: string): {
 }
 
 export function extractFileReferences(fileBlock: string, pattern: RegExp): FileReferenceInfo[] {
-  const paths = [...fileBlock.matchAll(pattern)].map((match) => unescapeHtmlEntities(match[1]));
   const seen = new Set<string>();
   const files: FileReferenceInfo[] = [];
 
-  for (const path of paths) {
-    if (seen.has(path)) continue;
-    seen.add(path);
+  for (const match of fileBlock.matchAll(pattern)) {
+    const path = unescapeHtmlEntities(match[1]);
+    const lines = match[2] ?? '';
+    const dedupeKey = lines ? `${path}#${lines}` : path;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const [startLineToken, endLineToken] = lines.split('-');
+    const startLine = parseLineNumber(startLineToken);
+    const endLine = parseLineNumber(endLineToken ?? startLineToken);
+    const fileName = path.split('/').pop() ?? path;
+    const displayName = startLine
+      ? `${fileName}:${startLine === endLine || !endLine ? String(startLine) : `${startLine}-${endLine}`}`
+      : fileName;
+
     files.push({
       relativePath: path,
       absolutePath: isAbsolutePath(path) ? path : undefined,
-      displayName: path.split('/').pop() ?? path,
+      displayName,
+      startLine,
+      endLine,
     });
   }
 
@@ -222,6 +221,12 @@ export function unescapeHtmlEntities(value: string): string {
   return div.textContent ?? value;
 }
 
+function parseLineNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function stripInlineFileMarkers(
   text: string,
   files: FileReferenceInfo[]
@@ -232,8 +237,8 @@ export function stripInlineFileMarkers(
 
   for (const file of files) {
     const markers = [
-      `[[file:${file.absolutePath ?? file.relativePath}]]`,
-      `[[file:${file.relativePath}]]`,
+      buildInlineFileMarker(file),
+      buildInlineFileMarker({ ...file, absolutePath: undefined }),
       `@${file.relativePath}`,
     ];
     let marker = '';
@@ -278,8 +283,8 @@ export function normalizeInlineFileDisplay(
 
   const hasInlineMarkers = files.some((file) =>
     text.includes(`@${file.relativePath}`) ||
-    text.includes(`[[file:${file.relativePath}]]`) ||
-    (file.absolutePath ? text.includes(`[[file:${file.absolutePath}]]`) : false)
+    text.includes(buildInlineFileMarker({ ...file, absolutePath: undefined })) ||
+    (file.absolutePath ? text.includes(buildInlineFileMarker(file)) : false)
   );
   const hasExplicitOffsets = files.some((file) => typeof file.insertOffset === 'number');
   if (!hasInlineMarkers && hasExplicitOffsets) {
@@ -294,7 +299,7 @@ export function shouldCollapseUserMessage(text: string): boolean {
   return text.split('\n').length > USER_MESSAGE_COLLAPSE_LINE_LIMIT;
 }
 
-export function buildInlineUserNodes(text: string, files: FileReferenceInfo[]): ReactNode[] {
+export function buildInlineUserNodes(text: string, files: FileReferenceInfo[], filesClickable = false): ReactNode[] {
   const positionedFiles = files
     .filter((file) => typeof file.insertOffset === 'number')
     .map((file) => ({
@@ -306,7 +311,7 @@ export function buildInlineUserNodes(text: string, files: FileReferenceInfo[]): 
   const nodes: ReactNode[] = [];
   if (positionedFiles.length === 0) {
     files.forEach((file, index) => {
-      nodes.push(<AttachedFileChip file={file} key={`file-${file.relativePath}-${index}`} />);
+      nodes.push(<AttachedFileChip file={file} clickable={filesClickable} key={`file-${file.relativePath}-${index}`} />);
     });
     if (text) {
       nodes.push(
@@ -329,7 +334,7 @@ export function buildInlineUserNodes(text: string, files: FileReferenceInfo[]): 
         </span>
       );
     }
-    nodes.push(<AttachedFileChip file={file} key={`file-${file.relativePath}-${index}`} />);
+    nodes.push(<AttachedFileChip file={file} clickable={filesClickable} key={`file-${file.relativePath}-${index}`} />);
     textOffset = insertOffset;
   });
 
@@ -349,7 +354,7 @@ export interface HistoryCallbacks {
   onRestoreCheckpoint: (turnNumber: number) => void;
   onRedoCheckpoint: () => void;
   onOpenDiff: (filePath: string, toolCallId: string) => void;
-  onOpenFile: (filePath: string) => void;
+  onOpenFile: (filePath: string, startLine?: number, endLine?: number) => void;
 }
 
 export function buildHistoryNodes(
@@ -468,6 +473,7 @@ export function renderHistoryMessage(options: RenderHistoryMessageOptions): Reac
               files={normalized.files}
               expanded={expanded}
               onToggle={() => callbacks.onToggleExpandedUserMessage(index)}
+              filesClickable
             />
           ) : null}
         </div>

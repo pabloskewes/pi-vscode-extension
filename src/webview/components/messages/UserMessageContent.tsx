@@ -8,6 +8,7 @@ interface UserMessageContentProps {
   files: FileReferenceInfo[];
   expanded: boolean;
   onToggle: () => void;
+  filesClickable?: boolean;
 }
 
 export default function UserMessageContent({
@@ -15,11 +16,12 @@ export default function UserMessageContent({
   files,
   expanded,
   onToggle,
+  filesClickable = false,
 }: UserMessageContentProps): ReactNode {
   if (files.length > 0) {
     return (
       <div className="message-content message-content-user">
-        <div className="user-inline-content">{buildInlineUserNodes(text.replace(/\r\n/g, '\n'), files)}</div>
+        <div className="user-inline-content">{buildInlineUserNodes(text.replace(/\r\n/g, '\n'), files, filesClickable)}</div>
       </div>
     );
   }

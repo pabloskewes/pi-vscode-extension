@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { PiSessionManager } from '../pi/session';
-import type { ClientMessage, CompletionSound, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
+import { buildInlineFileMarker } from '../shared/file-markers';
+import type { ClientMessage, CompletionSound, EditorSelectionInfo, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
@@ -19,6 +20,11 @@ interface MessageMeta {
 
 interface PendingApproval {
     resolve: (approved: boolean) => void;
+}
+
+interface EditorSelectionContext extends EditorSelectionInfo {
+    text: string;
+    promptPath: string;
 }
 
 interface TabState {
@@ -41,6 +47,8 @@ interface TabState {
     queuedMessages: string[];
     isStreaming: boolean;
     userPromptDisplay: Map<number, { text: string; files: FileReferenceInfo[] }>;
+    pendingEditorSelections: Map<string, EditorSelectionContext>;
+    pendingEditorSelectionDeliveries: Set<string>;
     namingInProgress: boolean;
 }
 
@@ -75,6 +83,8 @@ function makeTabState(
         queuedMessages: [],
         isStreaming: false,
         userPromptDisplay: new Map(),
+        pendingEditorSelections: new Map(),
+        pendingEditorSelectionDeliveries: new Set(),
         namingInProgress: false,
     };
 }
@@ -89,6 +99,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _usageBridge: UsageBridge;
     private _workspaceFilesCache: FileReferenceInfo[] | undefined;
+    private _editorSelectionCounter = 0;
 
     constructor(
         extensionUri: vscode.Uri,
@@ -158,6 +169,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this._post({ type: 'ready' });
         this.sendStateSync();
+        this._deliverPendingEditorSelections(this._activeTab);
         void this._sendSessionsSnapshot();
     }
 
@@ -393,6 +405,69 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage(message);
     }
 
+    public async addActiveEditorSelectionToChat(): Promise<boolean> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return false;
+        }
+
+        const selection = editor.selection;
+        if (selection.isEmpty) {
+            return false;
+        }
+
+        const text = editor.document.getText(selection);
+        if (!text) {
+            return false;
+        }
+
+        const { startLine, endLine } = this._getVisibleSelectionRange(selection);
+        const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false);
+        const absolutePath = editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : undefined;
+        const promptPath = absolutePath ?? editor.document.uri.toString();
+        const fileName = path.basename(relativePath || absolutePath || editor.document.uri.path || 'selection');
+        const id = this._nextEditorSelectionId();
+        const displayName = `${fileName}:${this._formatLineRange(startLine, endLine)}`;
+
+        const editorSelection: EditorSelectionContext = {
+            id,
+            relativePath,
+            absolutePath,
+            displayName,
+            startLine,
+            endLine,
+            text,
+            promptPath,
+        };
+
+        this._activeTab.pendingEditorSelections.set(id, editorSelection);
+        this._activeTab.pendingEditorSelectionDeliveries.add(id);
+        await vscode.commands.executeCommand('pi-agent.chat.focus');
+        this._deliverPendingEditorSelections(this._activeTab);
+        return true;
+    }
+
+    private _deliverPendingEditorSelections(tab: TabState): void {
+        if (tab.id !== this._activeTabId) return;
+
+        for (const id of tab.pendingEditorSelectionDeliveries) {
+            const selection = tab.pendingEditorSelections.get(id);
+            if (!selection) continue;
+
+            this._post({
+                type: 'addEditorSelection',
+                selection: {
+                    id: selection.id,
+                    relativePath: selection.relativePath,
+                    absolutePath: selection.absolutePath,
+                    displayName: selection.displayName,
+                    startLine: selection.startLine,
+                    endLine: selection.endLine,
+                },
+            });
+        }
+    }
+
     private async _sendSessionsSnapshot(): Promise<void> {
         const tab = this._activeTab;
         if (!tab) return;
@@ -462,10 +537,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
                     tab.userPromptDisplay.set(turnIdx, { text: msg.text, files: msg.files ?? [] });
-                    const promptText = await this._buildPromptText(msg.text, msg.files ?? []);
+                    const promptText = await this._buildPromptText(tab, msg.text, msg.files ?? []);
                     await tab.session.prompt(promptText, msg.images);
+                    this._consumePendingEditorSelections(tab, msg.files ?? []);
                     break;
                 }
+                case 'editorSelectionAdded':
+                    tab.pendingEditorSelectionDeliveries.delete(msg.selectionId);
+                    break;
                 case 'steer':
                     await tab.session.steer(msg.text);
                     break;
@@ -526,6 +605,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
                     tab.userPromptDisplay.clear();
+                    tab.pendingEditorSelections.clear();
+                    tab.pendingEditorSelectionDeliveries.clear();
                     tab.queuedMessages = [];
                     tab.namingInProgress = false;
                     this._usageBridge.attach(tab.session.session);
@@ -547,6 +628,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
                     tab.userPromptDisplay.clear();
+                    tab.pendingEditorSelections.clear();
+                    tab.pendingEditorSelectionDeliveries.clear();
                     tab.queuedMessages = [];
                     tab.namingInProgress = false;
                     this._updateTabName(tab);
@@ -565,6 +648,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'getState':
                     this.sendStateSync();
+                    this._deliverPendingEditorSelections(tab);
                     break;
                 case 'getSkills': {
                     const skills = tab.session.getSkills();
@@ -598,7 +682,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     const fileUri = vscode.Uri.file(msg.filePath);
                     try {
                         const doc = await vscode.workspace.openTextDocument(fileUri);
-                        await vscode.window.showTextDocument(doc, { preview: true });
+                        const editor = await vscode.window.showTextDocument(doc, { preview: true });
+                        if (typeof msg.startLine === 'number' && msg.startLine > 0) {
+                            const startLineIndex = Math.min(msg.startLine - 1, Math.max(0, doc.lineCount - 1));
+                            const endLineIndex = Math.min(
+                                Math.max(startLineIndex, (msg.endLine ?? msg.startLine) - 1),
+                                Math.max(0, doc.lineCount - 1),
+                            );
+                            const selection = new vscode.Selection(
+                                startLineIndex,
+                                0,
+                                endLineIndex,
+                                doc.lineAt(endLineIndex).range.end.character,
+                            );
+                            editor.selection = selection;
+                            editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
+                        }
                     } catch { /* file may not exist */ }
                     break;
                 }
@@ -836,7 +935,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return a.localeCompare(b);
     }
 
-    private async _buildPromptText(text: string, files: FileReferenceInfo[]): Promise<string> {
+    private async _buildPromptText(tab: TabState, text: string, files: FileReferenceInfo[]): Promise<string> {
         if (!files.length) {
             return text;
         }
@@ -845,16 +944,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         let totalChars = 0;
         const promptFiles = files
             .map((file) => {
+                if (file.selectionId) {
+                    return file;
+                }
                 const uri = this._resolveFileReference(file);
                 return uri ? { ...file, absolutePath: uri.fsPath } : undefined;
             })
-            .filter((file): file is FileReferenceInfo & { absolutePath: string } => !!file);
+            .filter((file): file is FileReferenceInfo => !!file);
 
         if (!promptFiles.length) {
             return text;
         }
 
         for (const file of promptFiles.slice(0, FILE_CONTEXT_MAX_FILES)) {
+            const remaining = FILE_CONTEXT_MAX_TOTAL_CHARS - totalChars;
+            if (remaining <= 0) {
+                sections.push('<attachments-note>Additional attached files were omitted after reaching the total context limit.</attachments-note>');
+                break;
+            }
+
+            if (file.selectionId) {
+                const selectionContext = this._buildSelectionFileContext(tab, file, remaining);
+                sections.push(selectionContext.section);
+                totalChars += selectionContext.charCount;
+                continue;
+            }
+
+            if (!file.absolutePath) {
+                continue;
+            }
+
             const uri = vscode.Uri.file(file.absolutePath);
             try {
                 const bytes = await vscode.workspace.fs.readFile(uri);
@@ -865,29 +984,58 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     note = `\n[truncated after ${FILE_CONTEXT_MAX_CHARS_PER_FILE} chars]`;
                 }
 
-                const remaining = FILE_CONTEXT_MAX_TOTAL_CHARS - totalChars;
-                if (remaining <= 0) {
-                    sections.push('<attachments-note>Additional attached files were omitted after reaching the total context limit.</attachments-note>');
-                    break;
-                }
-
                 if (content.length > remaining) {
                     content = content.slice(0, remaining);
                     note = `\n[truncated after reaching total context limit of ${FILE_CONTEXT_MAX_TOTAL_CHARS} chars]`;
                 }
 
                 totalChars += content.length;
-                sections.push(`<file path="${this._escapeXmlAttribute(file.absolutePath)}">\n${content}${note}\n</file>`);
+                sections.push(`<file name="${this._escapeXmlAttribute(file.absolutePath)}">\n${content}${note}\n</file>`);
             } catch {
-                sections.push(`<file path="${this._escapeXmlAttribute(file.absolutePath)}">\n[unreadable or missing at send time]\n</file>`);
+                sections.push(`<file name="${this._escapeXmlAttribute(file.absolutePath)}">\n[unreadable or missing at send time]\n</file>`);
             }
         }
 
-        const fileContext = `Attached file context:\n\n${sections.join('\n\n')}`;
+        const fileContext = sections.join('\n\n');
         const userRequest = this._insertFileMarkers(text, promptFiles);
         return userRequest.trim()
             ? `${userRequest}\n\n${fileContext}`
             : fileContext;
+    }
+
+    private _buildSelectionFileContext(
+        tab: TabState,
+        file: FileReferenceInfo,
+        remainingChars: number,
+    ): { section: string; charCount: number } {
+        const lines = this._formatLineRange(file.startLine ?? 1, file.endLine ?? file.startLine ?? 1);
+        const escapedPath = this._escapeXmlAttribute(file.absolutePath ?? file.relativePath);
+        const missingSelectionSection = `<file name="${escapedPath}" lines="${lines}">\n[selection context unavailable at send time]\n</file>`;
+        if (!file.selectionId) {
+            return { section: missingSelectionSection, charCount: 0 };
+        }
+
+        const selection = tab.pendingEditorSelections.get(file.selectionId);
+        if (!selection) {
+            return { section: missingSelectionSection, charCount: 0 };
+        }
+
+        let content = selection.text;
+        let note = '';
+        if (content.length > FILE_CONTEXT_MAX_CHARS_PER_FILE) {
+            content = content.slice(0, FILE_CONTEXT_MAX_CHARS_PER_FILE);
+            note = `\n[truncated after ${FILE_CONTEXT_MAX_CHARS_PER_FILE} chars]`;
+        }
+
+        if (content.length > remainingChars) {
+            content = content.slice(0, remainingChars);
+            note = `\n[truncated after reaching total context limit of ${FILE_CONTEXT_MAX_TOTAL_CHARS} chars]`;
+        }
+
+        return {
+            section: `<file name="${this._escapeXmlAttribute(selection.promptPath)}" lines="${this._formatLineRange(selection.startLine, selection.endLine)}">\n${content}${note}\n</file>`,
+            charCount: content.length,
+        };
     }
 
     private _insertFileMarkers(text: string, files: FileReferenceInfo[]): string {
@@ -905,7 +1053,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         for (const file of positionedFiles) {
             const insertOffset = file.insertOffset ?? 0;
             result += text.slice(textOffset, insertOffset);
-            const marker = `[[file:${file.absolutePath ?? file.relativePath}]]`;
+            const marker = buildInlineFileMarker(file);
             const needsLeadingSpace = result.length > 0 && !/\s$/.test(result);
             const needsTrailingSpace = !!text[insertOffset] && !/^\s/.test(text.slice(insertOffset, insertOffset + 1));
             result += `${needsLeadingSpace ? ' ' : ''}${marker}${needsTrailingSpace ? ' ' : ''}`;
@@ -913,6 +1061,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
         result += text.slice(textOffset);
         return result;
+    }
+
+    private _consumePendingEditorSelections(tab: TabState, files: FileReferenceInfo[]): void {
+        for (const file of files) {
+            if (file.selectionId) {
+                tab.pendingEditorSelections.delete(file.selectionId);
+                tab.pendingEditorSelectionDeliveries.delete(file.selectionId);
+            }
+        }
     }
 
     private _resolveFileReference(file: FileReferenceInfo): vscode.Uri | undefined {
@@ -933,6 +1090,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             .replace(/"/g, '&quot;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+    }
+
+    private _nextEditorSelectionId(): string {
+        this._editorSelectionCounter += 1;
+        return `selection-${Date.now()}-${this._editorSelectionCounter}`;
+    }
+
+    private _getVisibleSelectionRange(selection: vscode.Selection): { startLine: number; endLine: number } {
+        const startLine = selection.start.line + 1;
+        let endLine = selection.end.line + 1;
+        if (selection.end.character === 0 && selection.end.line > selection.start.line) {
+            endLine -= 1;
+        }
+
+        return {
+            startLine,
+            endLine: Math.max(startLine, endLine),
+        };
+    }
+
+    private _formatLineRange(startLine: number, endLine: number): string {
+        return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
     }
 
     private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {
@@ -1010,6 +1189,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._usageBridge.attach(tab.session.session);
 
         this.sendStateSync();
+        this._deliverPendingEditorSelections(tab);
         void this._sendSessionsSnapshot();
     }
 

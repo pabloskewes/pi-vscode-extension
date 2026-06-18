@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type {
+  EditorSelectionInfo,
   FileReferenceInfo,
   ModelInfo,
   ResolvedFileReference,
@@ -129,6 +130,7 @@ export default function App(): ReactNode {
   const previousTabIdRef = useRef<string | undefined>(undefined);
   const steerToastTimerRef = useRef<number | null>(null);
   const requestCounterRef = useRef(0);
+  const insertedEditorSelectionIdsRef = useRef(new Set<string>());
 
   const pendingPasteResolutionsRef = useRef(
     new Map<string, (items: ResolvedFileReference[]) => void>()
@@ -249,7 +251,7 @@ export default function App(): ReactNode {
     const dt = event.dataTransfer;
     if (!dt) return [];
 
-    const uriList = dt.getData('text/uri-list');
+    const uriList = dt.getData('text/uri-list') || dt.getData('application/vnd.code.uri-list');
     if (uriList) {
       return uriList.split(/\r?\n/)
         .map((line) => line.trim())
@@ -298,7 +300,7 @@ export default function App(): ReactNode {
 
   const buildComposerFragmentFromText = (
     text: string,
-    filesByToken: Map<string, ComposerFragmentFile>
+    filesByOccurrence: ComposerFragmentFile[]
   ): DocumentFragment => {
     const fragment = document.createDocumentFragment();
     const tokens = parsePathTokens(text);
@@ -308,32 +310,24 @@ export default function App(): ReactNode {
     }
 
     let textOffset = 0;
-    for (const token of tokens) {
+    tokens.forEach((token, index) => {
       if (token.start > textOffset) {
         fragment.appendChild(document.createTextNode(text.slice(textOffset, token.start)));
       }
 
-      const resolved = filesByToken.get(token.path);
+      const resolved = filesByOccurrence[index];
       if (resolved?.kind === 'workspace' && resolved.file) {
         fragment.appendChild(createComposerFileChip(resolved.file));
       } else {
         fragment.appendChild(document.createTextNode(token.marker));
       }
       textOffset = token.end;
-    }
+    });
 
     if (textOffset < text.length) {
       fragment.appendChild(document.createTextNode(text.slice(textOffset)));
     }
     return fragment;
-  };
-
-  const buildFilesByToken = (items: ComposerFragmentFile[]): Map<string, ComposerFragmentFile> => {
-    const filesByToken = new Map<string, ComposerFragmentFile>();
-    for (const item of items) {
-      filesByToken.set(item.token, item);
-    }
-    return filesByToken;
   };
 
   const updateFileMenuFromInput = (input: HTMLElement): void => {
@@ -511,19 +505,47 @@ export default function App(): ReactNode {
     const structured = readClipboardFilePayload(event.clipboardData?.getData(FILE_REFS_MIME));
     if (structured && inputRef.current) {
       event.preventDefault();
-      const items: ComposerFragmentFile[] = [];
-      for (const token of parsePathTokens(structured.text)) {
-        const file = structured.files.find((candidate) => {
-          return token.path === candidate.absolutePath || token.path === candidate.relativePath;
-        });
-        if (file) {
-          items.push({ token: token.path, kind: 'workspace', file });
+      const hintsByPath = new Map<string, FileReferenceInfo[]>();
+      for (const file of structured.files) {
+        for (const key of [file.absolutePath, file.relativePath]) {
+          if (!key) continue;
+          const hints = hintsByPath.get(key) ?? [];
+          hints.push(file);
+          hintsByPath.set(key, hints);
         }
       }
-      insertComposerFragment(
-        inputRef.current,
-        buildComposerFragmentFromText(structured.text, buildFilesByToken(items))
-      );
+      const tokens = parsePathTokens(structured.text);
+      const missingTokens: string[] = [];
+      const hintedItems = tokens.map((token) => {
+        const hints = hintsByPath.get(token.path);
+        const hint = hints?.shift();
+        if (hint) return { token: token.path, kind: 'workspace' as const, file: hint };
+        missingTokens.push(token.path);
+        return null;
+      });
+
+      void resolveFileReferences(missingTokens).then((resolvedItems) => {
+        const input = inputRef.current;
+        if (!input) return;
+
+        const resolvedByToken = new Map<string, ResolvedFileReference[]>();
+        for (const resolved of resolvedItems) {
+          const items = resolvedByToken.get(resolved.token) ?? [];
+          items.push(resolved);
+          resolvedByToken.set(resolved.token, items);
+        }
+
+        const items: ComposerFragmentFile[] = tokens.map((token, index) => {
+          const hinted = hintedItems[index];
+          if (hinted) return hinted;
+          return resolvedByToken.get(token.path)?.shift() ?? { token: token.path, kind: 'unresolved', file: null };
+        });
+
+        insertComposerFragment(
+          input,
+          buildComposerFragmentFromText(structured.text, items)
+        );
+      });
       return;
     }
 
@@ -547,7 +569,7 @@ export default function App(): ReactNode {
       replaceTextNodeWithFragment(
         input,
         insertedTextNode,
-        buildComposerFragmentFromText(text, buildFilesByToken(resolvedItems))
+        buildComposerFragmentFromText(text, resolvedItems)
       );
     });
   };
@@ -731,6 +753,32 @@ export default function App(): ReactNode {
     vscode.postMessage({ type: 'prompt', text: payload.text || '', images, files });
   };
 
+  const insertEditorSelectionChip = (selection: EditorSelectionInfo): void => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    if (insertedEditorSelectionIdsRef.current.has(selection.id)) {
+      vscode.postMessage({ type: 'editorSelectionAdded', selectionId: selection.id });
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(createComposerFileChip({
+      relativePath: selection.relativePath,
+      absolutePath: selection.absolutePath,
+      displayName: selection.displayName,
+      selectionId: selection.id,
+      startLine: selection.startLine,
+      endLine: selection.endLine,
+    }));
+    insertComposerFragment(input, fragment);
+    hideFileMenu();
+    hideSlashMenu();
+    focusComposer();
+    insertedEditorSelectionIdsRef.current.add(selection.id);
+    vscode.postMessage({ type: 'editorSelectionAdded', selectionId: selection.id });
+  };
+
   const handleSendButton = (): void => {
     if (state.isStreaming) {
       const payload = getComposerPayload(inputRef.current);
@@ -857,6 +905,18 @@ export default function App(): ReactNode {
 
   const handleMessagesClick = async (event: React.MouseEvent<HTMLDivElement>): Promise<void> => {
     const target = event.target as HTMLElement;
+    const fileTarget = target.closest('[data-file-path][data-clickable="true"], .file-inline-link') as HTMLElement | null;
+    if (fileTarget) {
+      event.preventDefault();
+      const filePath = fileTarget.dataset.absolutePath ?? fileTarget.dataset.filePath;
+      if (filePath) {
+        const startLine = fileTarget.dataset.startLine ? Number(fileTarget.dataset.startLine) : undefined;
+        const endLine = fileTarget.dataset.endLine ? Number(fileTarget.dataset.endLine) : undefined;
+        openFile(filePath, startLine, endLine);
+      }
+      return;
+    }
+
     const copyButton = target.closest('.copy-btn') as HTMLButtonElement | null;
     if (!copyButton) return;
 
@@ -884,8 +944,8 @@ export default function App(): ReactNode {
     vscode.postMessage({ type: 'openDiff', filePath, toolCallId });
   };
 
-  const openFile = (filePath: string): void => {
-    vscode.postMessage({ type: 'openFile', filePath });
+  const openFile = (filePath: string, startLine?: number, endLine?: number): void => {
+    vscode.postMessage({ type: 'openFile', filePath, startLine, endLine });
   };
 
   const handleSetThinkingLevel = (level: string): void => {
@@ -1010,6 +1070,10 @@ export default function App(): ReactNode {
           setErrors([]);
           break;
         }
+
+        case 'addEditorSelection':
+          insertEditorSelectionChip(message.selection);
+          break;
 
         case 'agentEvent':
           handleAgentEvent(

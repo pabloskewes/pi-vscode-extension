@@ -13,7 +13,16 @@
     "AI",
     "Chat"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:pi-agent.chat",
+    "onCommand:pi-agent.newChat",
+    "onCommand:pi-agent.abort",
+    "onCommand:pi-agent.selectModel",
+    "onCommand:pi-agent.toggleThinking",
+    "onCommand:pi-agent.focusChat",
+    "onCommand:pi-agent.addSelectionToChat",
+    "onCommand:pi-agent.openSettings"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -56,15 +65,20 @@
         "title": "Pi: Focus Chat"
       },
       {
+        "command": "pi-agent.addSelectionToChat",
+        "title": "Pi: Add Selection to Chat"
+      },
+      {
         "command": "pi-agent.openSettings",
         "title": "Pi: Open Settings"
       }
     ],
     "keybindings": [
       {
-        "command": "pi-agent.focusChat",
-        "key": "ctrl+shift+l",
-        "mac": "cmd+shift+l"
+        "command": "pi-agent.addSelectionToChat",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "editorTextFocus"
       },
       {
         "command": "pi-agent.newChat",
@@ -77,6 +91,15 @@
         "when": "pi-agent.isStreaming"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "pi-agent.addSelectionToChat",
+          "when": "editorHasSelection",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Pi Agent",
       "properties": {

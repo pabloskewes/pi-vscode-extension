@@ -492,6 +492,12 @@ body {
 }
 .message-content a:hover { text-decoration: underline; }
 
+.file-inline-link {
+    color: var(--link);
+    text-decoration: none;
+    word-break: break-word;
+}
+
 .message-content ul, .message-content ol {
     margin: 8px 0;
     padding-left: 24px;
@@ -893,6 +899,14 @@ body {
 .attachment-chip-static {
     cursor: default;
     user-select: text;
+}
+
+.attachment-chip-static[data-clickable="true"] {
+    cursor: pointer;
+}
+
+.attachment-chip-static[data-clickable="true"]:hover {
+    text-decoration: underline;
 }
 
 .attachment-file-icon {

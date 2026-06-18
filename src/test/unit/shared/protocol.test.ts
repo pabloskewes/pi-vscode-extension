@@ -12,6 +12,8 @@ describe('Protocol types', () => {
             { type: 'getModels' },
             { type: 'getSessions' },
             { type: 'getState' },
+            { type: 'openFile', filePath: '/tmp/test.txt', startLine: 10, endLine: 12 },
+            { type: 'editorSelectionAdded', selectionId: 'selection-1' },
         ];
 
         for (const msg of messages) {
@@ -34,6 +36,17 @@ describe('Protocol types', () => {
         const messages: ServerMessage[] = [
             { type: 'ready' },
             { type: 'stateSync', state },
+            {
+                type: 'addEditorSelection',
+                selection: {
+                    id: 'selection-1',
+                    relativePath: 'src/file.ts',
+                    absolutePath: '/workspace/src/file.ts',
+                    displayName: 'file.ts:10-12',
+                    startLine: 10,
+                    endLine: 12,
+                },
+            },
             { type: 'error', message: 'something went wrong' },
             { type: 'models', models: [{ provider: 'ollama', id: 'test', name: 'Test' }] },
         ];

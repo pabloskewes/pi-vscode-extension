@@ -14,7 +14,8 @@ export function getComposerPayload(input: HTMLElement | null): ComposerPayload {
   const files: FileReferenceInfo[] = [];
 
   for (const file of raw.files) {
-    const dedupeKey = file.absolutePath ?? file.relativePath;
+    const rangeKey = (typeof file.startLine === 'number') ? `:${file.startLine}-${file.endLine ?? file.startLine}` : '';
+    const dedupeKey = file.selectionId ?? `${file.absolutePath ?? file.relativePath}${rangeKey}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     const rawOffset = file.insertOffset ?? 0;
@@ -23,6 +24,9 @@ export function getComposerPayload(input: HTMLElement | null): ComposerPayload {
       absolutePath: file.absolutePath,
       displayName: file.displayName,
       insertOffset: Math.max(0, Math.min(text.length, rawOffset - leadingTrim)),
+      selectionId: file.selectionId,
+      startLine: file.startLine,
+      endLine: file.endLine,
     });
   }
 
@@ -57,6 +61,9 @@ export function readComposerContent(root: Node): ComposerContent {
         absolutePath: node.dataset.absolutePath,
         displayName: node.dataset.fileName ?? node.dataset.filePath ?? '',
         insertOffset: text.length,
+        selectionId: node.dataset.selectionId,
+        startLine: parseOptionalNumber(node.dataset.startLine),
+        endLine: parseOptionalNumber(node.dataset.endLine),
       });
       return;
     }
@@ -283,6 +290,15 @@ export function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
     chip.dataset.absolutePath = file.absolutePath;
   }
   chip.dataset.fileName = file.displayName;
+  if (file.selectionId) {
+    chip.dataset.selectionId = file.selectionId;
+  }
+  if (typeof file.startLine === 'number') {
+    chip.dataset.startLine = String(file.startLine);
+  }
+  if (typeof file.endLine === 'number') {
+    chip.dataset.endLine = String(file.endLine);
+  }
   chip.title = file.relativePath;
   chip.innerHTML = `
         <span class="attachment-file-icon">@</span>
@@ -370,7 +386,8 @@ export function readChipFileReferences(root: ParentNode): FileReferenceInfo[] {
     const relativePath = element.dataset.filePath ?? '';
     if (!relativePath) continue;
     const absolutePath = element.dataset.absolutePath;
-    const dedupeKey = absolutePath ?? relativePath;
+    const lineKey = element.dataset.startLine ? `:${element.dataset.startLine}-${element.dataset.endLine ?? element.dataset.startLine}` : '';
+    const dedupeKey = element.dataset.selectionId ?? `${absolutePath ?? relativePath}${lineKey}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
@@ -378,8 +395,17 @@ export function readChipFileReferences(root: ParentNode): FileReferenceInfo[] {
       relativePath,
       absolutePath,
       displayName: element.dataset.fileName ?? relativePath,
+      selectionId: element.dataset.selectionId,
+      startLine: parseOptionalNumber(element.dataset.startLine),
+      endLine: parseOptionalNumber(element.dataset.endLine),
     });
   }
 
   return files;
+}
+
+function parseOptionalNumber(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

@@ -95,6 +95,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 vscode.commands.executeCommand('pi-agent.chat.focus');
             }),
 
+            vscode.commands.registerCommand('pi-agent.addSelectionToChat', async () => {
+                await sidebarProvider.addActiveEditorSelectionToChat();
+            }),
+
             vscode.commands.registerCommand('pi-agent.openSettings', () => {
                 SettingsPanel.show(context.extensionUri, context.secrets);
             }),

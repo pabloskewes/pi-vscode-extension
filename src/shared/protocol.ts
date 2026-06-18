@@ -158,6 +158,18 @@ export interface FileReferenceInfo {
     absolutePath?: string;
     displayName: string;
     insertOffset?: number;
+    selectionId?: string;
+    startLine?: number;
+    endLine?: number;
+}
+
+export interface EditorSelectionInfo {
+    id: string;
+    relativePath: string;
+    absolutePath?: string;
+    displayName: string;
+    startLine: number;
+    endLine: number;
 }
 
 export interface ResolvedFileReference {
@@ -202,7 +214,7 @@ export type ClientMessage =
     | { type: 'getState' }
     | { type: 'approveToolCall'; toolCallId: string }
     | { type: 'rejectToolCall'; toolCallId: string }
-    | { type: 'openFile'; filePath: string }
+    | { type: 'openFile'; filePath: string; startLine?: number; endLine?: number }
     | { type: 'openDiff'; filePath: string; toolCallId: string }
     | { type: 'undoFileChange'; filePath: string; toolCallId: string }
     | { type: 'restoreCheckpoint'; messageIndex: number }
@@ -216,6 +228,7 @@ export type ClientMessage =
     | { type: 'searchFiles'; query: string }
     | { type: 'resolveFileReferences'; requestId: string; tokens: string[] }
     | { type: 'resolveDroppedFiles'; requestId: string; paths: string[] }
+    | { type: 'editorSelectionAdded'; selectionId: string }
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
@@ -236,6 +249,7 @@ export type SettingsClientMessage =
 export type ServerMessage =
     | { type: 'ready' }
     | { type: 'stateSync'; state: SerializedAgentState }
+    | { type: 'addEditorSelection'; selection: EditorSelectionInfo }
     | { type: 'agentEvent'; event: any }
     | { type: 'models'; models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: string }
     | { type: 'modelChanged'; model: ModelInfo; thinkingLevel?: string }
