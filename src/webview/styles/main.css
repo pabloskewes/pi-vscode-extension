@@ -1115,34 +1115,48 @@ body {
 .input-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 4px 10px 8px;
+    min-width: 0;
 }
 
 .footer-model {
     font-size: 13px;
-    color: var(--muted);
+    color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 200px;
+    flex: 1 1 auto;
+    min-width: 90px;
     cursor: pointer;
-    transition: color 0.15s;
+    transition: color 0.15s, opacity 0.15s;
 }
 .footer-model:hover {
-    color: var(--fg);
+    opacity: 0.82;
 }
 
 .footer-context {
-    font-size: 12px;
-    padding: 2px 8px;
-    background: var(--badge-bg);
-    color: var(--badge-fg);
-    border-radius: 10px;
+    --context-percent: 0%;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    background: conic-gradient(var(--link) var(--context-percent), rgba(255, 255, 255, 0.13) 0);
 }
 
-.footer-spacer {
-    flex: 1;
+.footer-context-ring {
+    width: 15px;
+    height: 15px;
+    border-radius: 10px;
+    background: var(--input-bg);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.footer-context-empty {
+    background: rgba(255, 255, 255, 0.13);
 }
 
 .abort-btn {
@@ -1156,6 +1170,7 @@ body {
     display: flex;
     align-items: center;
     gap: 5px;
+    flex-shrink: 0;
     transition: background 0.15s, border-color 0.15s;
 }
 .abort-btn:hover {
@@ -1972,8 +1987,8 @@ body {
 .usage-bar-slot {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-right: auto;
+    gap: 4px;
+    flex: 0 0 auto;
 }
 
 .usage-chip {
@@ -2045,22 +2060,6 @@ body {
 .usage-status-local { background: var(--link); }
 .usage-status-unavailable { background: var(--error-fg); }
 
-.usage-detail-btn {
-    background: none;
-    border: none;
-    color: var(--muted);
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    flex-shrink: 0;
-    transition: background 0.15s, color 0.15s;
-}
-
 .usage-refresh-btn {
     background: none;
     border: none;
@@ -2077,8 +2076,7 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 
-.usage-refresh-btn:hover,
-.usage-detail-btn:hover {
+.usage-refresh-btn:hover {
     background: rgba(255, 255, 255, 0.06);
     color: var(--fg);
 }

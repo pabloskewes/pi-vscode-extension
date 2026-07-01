@@ -40,7 +40,6 @@ export default function Footer({
       <span className="footer-model" ref={footerModelRef} onClick={onToggleModelPicker}>
         {model?.name ?? model?.id ?? ''}
       </span>
-      <span className="footer-spacer" />
       <UsageWidget
         usage={usage}
         open={usagePopoverOpen}

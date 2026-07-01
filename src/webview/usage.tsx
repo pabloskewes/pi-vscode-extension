@@ -29,61 +29,30 @@ export function UsageWidget({ usage, open, onToggle, onClose, onRefresh }: Usage
     }
 
     const fiveHour = primary.windows.find((window) => window.key === 'fiveHour');
-    const weekly = primary.windows.find((window) => window.key === 'weekly');
-    const fallbackBalance = primary.balances[0];
-    const hasFallbackBalance = primary.balances.length > 0 && !fiveHour && !weekly;
+    if (!fiveHour || fiveHour.unavailableReason) {
+        return null;
+    }
 
     return (
         <>
             <div className="usage-bar-slot" id="usage-bar-slot">
-                {fiveHour && !fiveHour.unavailableReason ? (
-                    <UsageChip
-                        title={`${primary.label} 5h: ${Math.max(0, 100 - fiveHour.usedPercent)}% left${formatResetShort(fiveHour.resetAt) ? `, resets in ${formatResetShort(fiveHour.resetAt)}` : ''}`}
-                        onActivate={onToggle}
-                    >
-                        {statusDot(primary.status)}
-                        <span className="usage-chip-label">5h</span>
-                        <MiniBar usedPercent={fiveHour.usedPercent} />
-                        <span className="usage-chip-pct">{Math.max(0, 100 - fiveHour.usedPercent)}%</span>
-                        {formatResetShort(fiveHour.resetAt) ? (
-                            <span className="usage-chip-reset">{formatResetShort(fiveHour.resetAt)}</span>
-                        ) : null}
-                    </UsageChip>
-                ) : null}
-
-                {weekly && !weekly.unavailableReason ? (
-                    <UsageChip
-                        className="usage-chip-secondary"
-                        title={`${primary.label} weekly: ${Math.max(0, 100 - weekly.usedPercent)}% left`}
-                        onActivate={onToggle}
-                    >
-                        <span className="usage-chip-label">Wk</span>
-                        <span className="usage-chip-pct">{Math.max(0, 100 - weekly.usedPercent)}%</span>
-                    </UsageChip>
-                ) : null}
-
-                {hasFallbackBalance && fallbackBalance ? (
-                    <UsageChip
-                        title={`${primary.label}: ${fallbackBalance.label}`}
-                        onActivate={onToggle}
-                    >
-                        {statusDot(primary.status)}
-                        <span className="usage-chip-label">{fallbackBalance.label}</span>
-                        <span className="usage-chip-pct">
-                            {fallbackBalance.remaining != null ? `$${fallbackBalance.remaining.toFixed(2)}` : '-'}
-                        </span>
-                    </UsageChip>
-                ) : null}
+                <UsageChip
+                    title={`${primary.label} 5h: ${Math.max(0, 100 - fiveHour.usedPercent)}% left${formatResetShort(fiveHour.resetAt) ? `, resets in ${formatResetShort(fiveHour.resetAt)}` : ''}`}
+                    onActivate={onToggle}
+                >
+                    {statusDot(primary.status)}
+                    <span className="usage-chip-label">5h</span>
+                    <MiniBar usedPercent={fiveHour.usedPercent} />
+                    <span className="usage-chip-pct">{Math.max(0, 100 - fiveHour.usedPercent)}%</span>
+                    {formatResetShort(fiveHour.resetAt) ? (
+                        <span className="usage-chip-reset">{formatResetShort(fiveHour.resetAt)}</span>
+                    ) : null}
+                </UsageChip>
 
                 <button className="usage-refresh-btn" title="Refresh usage" type="button" onClick={onRefresh}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                         <path d="M13 3v4H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                         <path d="M13 7a5 5 0 1 0 1 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                </button>
-                <button className="usage-detail-btn" title="Usage details" type="button" onClick={onToggle}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                        <path d="M8 1v6M8 11h.01M2 8a6 6 0 1 1 12 0A6 6 0 0 1 2 8Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                     </svg>
                 </button>
             </div>
