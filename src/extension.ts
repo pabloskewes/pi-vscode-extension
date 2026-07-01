@@ -31,7 +31,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const applyDebugMcpConfiguration = async () => {
             const config = vscode.workspace.getConfiguration('pi-agent');
-            const enabled = config.get<boolean>('debugMcp.enabled', context.extensionMode === vscode.ExtensionMode.Development);
+            const enabled = config.get<boolean>('debugMcp.enabled', false);
             if (!enabled) {
                 await debugMcpServer.stop();
                 return;
