@@ -28,7 +28,7 @@ export default function ContextUsage({ contextUsage }: ContextUsageProps): React
       : `Context window: ${contextWindow} tokens`;
 
   return (
-    <span className="footer-context" title={detail} aria-label={detail}>
+    <span className="footer-context" title={detail} aria-label={detail} data-tooltip={detail} tabIndex={0}>
       <svg
         className="footer-context-ring"
         width={RING_SIZE}
