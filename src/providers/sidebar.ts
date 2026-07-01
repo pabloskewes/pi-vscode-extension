@@ -1233,7 +1233,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div id="app" data-icons-uri="${iconsUri}"></div>
-    <script nonce="${nonce}" src="${bridgeUri}"></script>
+    ${this._debugController.isEnabled() ? `<script nonce="${nonce}" src="${bridgeUri}"></script>` : ''}
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

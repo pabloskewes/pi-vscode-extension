@@ -27,9 +27,27 @@ export class WebviewDebugController implements vscode.Disposable {
     private _logSeq = 0;
     private _pendingRequests = new Map<string, PendingRequest>();
     private _consoleLogs: DebugBridgeLogEntry[] = [];
+    private _enabled = false;
 
     constructor(private readonly _outputChannel: vscode.OutputChannel) {
         this._readyPromise = this._createReadyPromise();
+    }
+
+    isEnabled(): boolean {
+        return this._enabled;
+    }
+
+    setEnabled(enabled: boolean): void {
+        if (this._enabled === enabled) {
+            return;
+        }
+        this._enabled = enabled;
+        if (!enabled) {
+            this._consoleLogs.length = 0;
+            this._logSeq = 0;
+            this._rejectPendingRequests(new Error('Webview debug bridge is disabled.'));
+        }
+        this._outputChannel.appendLine(`[PI-MCP] Webview debug bridge ${enabled ? 'enabled' : 'disabled'}.`);
     }
 
     attachWebview(webview: vscode.Webview): void {
@@ -62,9 +80,11 @@ export class WebviewDebugController implements vscode.Disposable {
                 this._outputChannel.appendLine(`[PI-MCP] Webview debug bridge ready: ${message.href}`);
                 break;
             case 'log':
+                if (!this._enabled) return;
                 this._appendConsoleLog(message.level, message.args, message.timestamp);
                 break;
             case 'pageError':
+                if (!this._enabled) return;
                 this._appendConsoleLog('error', [{
                     kind: 'pageError',
                     message: message.message,
@@ -75,6 +95,7 @@ export class WebviewDebugController implements vscode.Disposable {
                 }], message.timestamp);
                 break;
             case 'unhandledRejection':
+                if (!this._enabled) return;
                 this._appendConsoleLog('error', [{
                     kind: 'unhandledRejection',
                     reason: message.reason,
@@ -103,6 +124,9 @@ export class WebviewDebugController implements vscode.Disposable {
     }
 
     getConsoleLogs(since = 0): { entries: DebugBridgeLogEntry[]; nextSince: number } {
+        if (!this._enabled) {
+            return { entries: [], nextSince: this._logSeq };
+        }
         const entries = since > 0
             ? this._consoleLogs.filter((entry) => entry.seq > since)
             : [...this._consoleLogs];
@@ -149,6 +173,7 @@ export class WebviewDebugController implements vscode.Disposable {
     }
 
     private async _appendDebugFileLog(entry: DebugBridgeLogEntry): Promise<void> {
+        if (!this._enabled) return;
         try {
             const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
             if (!wsRoot) return;
@@ -172,6 +197,9 @@ export class WebviewDebugController implements vscode.Disposable {
     }
 
     private async _sendRequest(request: DebugBridgeRequest): Promise<unknown> {
+        if (!this._enabled) {
+            throw new Error('Webview debug bridge is disabled. Enable pi-agent.debugMcp.enabled to use this tool.');
+        }
         await this._awaitBridgeReady();
 
         const webview = this._webview;
