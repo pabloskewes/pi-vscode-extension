@@ -224,7 +224,7 @@ export function insertComposerText(input: HTMLElement, text: string): void {
   insertComposerTextNode(input, text);
 }
 
-export function insertComposerTextNode(input: HTMLElement, text: string): Text {
+function getComposerInsertionRange(input: HTMLElement): Range {
   const selection = window.getSelection();
   const range = document.createRange();
 
@@ -236,6 +236,12 @@ export function insertComposerTextNode(input: HTMLElement, text: string): Text {
     range.selectNodeContents(input);
     range.collapse(false);
   }
+
+  return range;
+}
+
+export function insertComposerTextNode(input: HTMLElement, text: string): Text {
+  const range = getComposerInsertionRange(input);
 
   range.deleteContents();
   const textNode = document.createTextNode(text);
@@ -246,17 +252,7 @@ export function insertComposerTextNode(input: HTMLElement, text: string): Text {
 }
 
 export function insertComposerFragment(input: HTMLElement, fragment: DocumentFragment): void {
-  const selection = window.getSelection();
-  const range = document.createRange();
-
-  if (selection && selection.rangeCount > 0 && selection.anchorNode && isNodeInside(selection.anchorNode, input)) {
-    const selectedRange = selection.getRangeAt(0);
-    range.setStart(selectedRange.startContainer, selectedRange.startOffset);
-    range.setEnd(selectedRange.endContainer, selectedRange.endOffset);
-  } else {
-    range.selectNodeContents(input);
-    range.collapse(false);
-  }
+  const range = getComposerInsertionRange(input);
 
   range.deleteContents();
   const caretNode = document.createTextNode('');

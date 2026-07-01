@@ -889,14 +889,6 @@ export default function App(): ReactNode {
       return;
     }
 
-    if (event.key === 'Enter' && event.shiftKey) {
-      event.preventDefault();
-      if (inputRef.current) {
-        insertComposerText(inputRef.current, '\n');
-      }
-      return;
-    }
-
     if (event.key === 'Escape' && state.isStreaming) {
       event.preventDefault();
       vscode.postMessage({ type: 'abort' });
