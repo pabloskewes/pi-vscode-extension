@@ -34,11 +34,22 @@ function filterEnabledModels(models: ModelInfo[]): ModelInfo[] {
         return models;
     }
 
-    const filtered = models.filter((model) =>
-        patterns.some((pattern) => matchesModelPattern(model, pattern))
-    );
+    // Walk patterns in declaration order so the picker reflects the order
+    // the user wrote them in `enabledModels`.
+    const seen = new Set<string>();
+    const ordered: ModelInfo[] = [];
+    for (const pattern of patterns) {
+        for (const model of models) {
+            const key = `${model.provider}:${model.id}`;
+            if (seen.has(key)) continue;
+            if (matchesModelPattern(model, pattern)) {
+                seen.add(key);
+                ordered.push(model);
+            }
+        }
+    }
 
-    return filtered.length > 0 ? filtered : models;
+    return ordered.length > 0 ? ordered : models;
 }
 
 function readEnabledModelPatterns(): string[] {
