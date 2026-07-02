@@ -12,6 +12,19 @@ const FILE_SEARCH_RESULT_LIMIT = 24;
 const FILE_CONTEXT_MAX_FILES = 6;
 const FILE_CONTEXT_MAX_CHARS_PER_FILE = 20000;
 const FILE_CONTEXT_MAX_TOTAL_CHARS = 60000;
+const DIRECTORY_CONTEXT_MAX_FILES = 50;
+const DIRECTORY_CONTEXT_MAX_DEPTH = 5;
+const DIRECTORY_CONTEXT_MAX_TREE_ENTRIES = 200;
+const DIRECTORY_CONTEXT_EXCLUDED_NAMES = new Set([
+    '.git',
+    'node_modules',
+    'dist',
+    'out',
+    'coverage',
+    '.next',
+    '.turbo',
+    'build',
+]);
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -668,7 +681,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'resolveDroppedFiles': {
-                    const items = await this._resolveFileReferences(msg.paths);
+                    const items = await this._resolveDroppedFileReferences(msg.paths);
                     this._post({ type: 'resolvedDroppedFiles', requestId: msg.requestId, items });
                     break;
                 }
@@ -681,6 +694,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'openFile': {
                     const fileUri = vscode.Uri.file(msg.filePath);
                     try {
+                        const fileType = await this._getFileType(fileUri);
+                        if (fileType !== undefined && (fileType & vscode.FileType.Directory) !== 0) {
+                            await vscode.commands.executeCommand('revealInExplorer', fileUri);
+                            break;
+                        }
+
                         const doc = await vscode.workspace.openTextDocument(fileUri);
                         const editor = await vscode.window.showTextDocument(doc, { preview: true });
                         if (typeof msg.startLine === 'number' && msg.startLine > 0) {
@@ -844,6 +863,37 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return resolved;
     }
 
+    private async _resolveDroppedFileReferences(paths: string[]): Promise<ResolvedFileReference[]> {
+        const resolved: ResolvedFileReference[] = [];
+
+        for (const token of paths) {
+            const candidate = token.trim();
+            if (!candidate) {
+                resolved.push({ token, kind: 'unresolved', file: null });
+                continue;
+            }
+
+            const uri = this._toUriFromPathCandidate(candidate);
+            if (!uri) {
+                resolved.push({ token, kind: 'unresolved', file: null });
+                continue;
+            }
+
+            const fileType = await this._getFileType(uri);
+            if (fileType === undefined) {
+                resolved.push({ token, kind: 'unresolved', file: null });
+                continue;
+            }
+
+            const kind = (fileType & vscode.FileType.Directory) !== 0 ? 'directory' : 'file';
+            const file = this._toFileReference(uri, candidate, kind);
+            const referenceKind = this._isWorkspaceFileReference(file) ? 'workspace' : 'external';
+            resolved.push({ token, kind: referenceKind, file });
+        }
+
+        return resolved;
+    }
+
     private async _getWorkspaceFiles(): Promise<FileReferenceInfo[]> {
         if (this._workspaceFilesCache) {
             return this._workspaceFilesCache;
@@ -851,10 +901,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const excludes = '**/{.git,node_modules,dist,out,coverage,.next,.turbo,build}/**';
         const uris = await vscode.workspace.findFiles('**/*', excludes, 2000);
-        this._workspaceFilesCache = uris
+        const files: FileReferenceInfo[] = uris
             .map((uri) => {
                 const relativePath = vscode.workspace.asRelativePath(uri, false);
                 return {
+                    kind: 'file' as const,
                     relativePath,
                     absolutePath: uri.fsPath,
                     displayName: relativePath.split('/').pop() ?? relativePath,
@@ -862,6 +913,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             })
             .filter((file) => file.relativePath.length > 0)
             .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+        this._workspaceFilesCache = files;
         return this._workspaceFilesCache;
     }
 
@@ -889,21 +941,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async _isRegularFile(uri: vscode.Uri): Promise<boolean> {
+        const fileType = await this._getFileType(uri);
+        return fileType !== undefined && (fileType & vscode.FileType.Directory) === 0;
+    }
+
+    private async _getFileType(uri: vscode.Uri): Promise<vscode.FileType | undefined> {
         try {
             const stat = await vscode.workspace.fs.stat(uri);
-            return (stat.type & vscode.FileType.Directory) === 0;
+            return stat.type;
         } catch {
-            return false;
+            return undefined;
         }
     }
 
-    private _toFileReference(uri: vscode.Uri, fallbackPath?: string): FileReferenceInfo {
+    private _toFileReference(uri: vscode.Uri, fallbackPath?: string, kind: FileReferenceInfo['kind'] = 'file'): FileReferenceInfo {
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
         const relativePath = workspaceFolder
             ? vscode.workspace.asRelativePath(uri, false)
             : (fallbackPath?.trim() || uri.fsPath);
 
         return {
+            kind,
             relativePath,
             absolutePath: uri.fsPath,
             displayName: path.basename(uri.fsPath) || relativePath,
@@ -974,6 +1032,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 continue;
             }
 
+            if (file.kind === 'directory') {
+                const directoryContext = await this._buildDirectoryContext(file, remaining);
+                sections.push(directoryContext.section);
+                totalChars += directoryContext.charCount;
+                continue;
+            }
+
             const uri = vscode.Uri.file(file.absolutePath);
             try {
                 const bytes = await vscode.workspace.fs.readFile(uri);
@@ -1036,6 +1101,132 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             section: `<file name="${this._escapeXmlAttribute(selection.promptPath)}" lines="${this._formatLineRange(selection.startLine, selection.endLine)}">\n${content}${note}\n</file>`,
             charCount: content.length,
         };
+    }
+
+    private async _buildDirectoryContext(
+        file: FileReferenceInfo,
+        remainingChars: number,
+    ): Promise<{ section: string; charCount: number }> {
+        if (!file.absolutePath) {
+            return {
+                section: `<directory name="${this._escapeXmlAttribute(file.relativePath)}">\n[directory path unavailable at send time]\n</directory>`,
+                charCount: 0,
+            };
+        }
+
+        const rootUri = vscode.Uri.file(file.absolutePath);
+        const treeLines: string[] = [];
+        const contentFiles: { uri: vscode.Uri; relativePath: string }[] = [];
+        let omittedEntries = 0;
+        let treeTruncated = false;
+
+        const visit = async (uri: vscode.Uri, relativePath: string, depth: number): Promise<void> => {
+            let entries: [string, vscode.FileType][];
+            try {
+                entries = await vscode.workspace.fs.readDirectory(uri);
+            } catch {
+                omittedEntries++;
+                return;
+            }
+
+            entries.sort(([leftName, leftType], [rightName, rightType]) => {
+                const leftIsDir = (leftType & vscode.FileType.Directory) !== 0;
+                const rightIsDir = (rightType & vscode.FileType.Directory) !== 0;
+                if (leftIsDir !== rightIsDir) return leftIsDir ? -1 : 1;
+                return leftName.localeCompare(rightName);
+            });
+
+            for (const [name, type] of entries) {
+                if (DIRECTORY_CONTEXT_EXCLUDED_NAMES.has(name)) {
+                    omittedEntries++;
+                    continue;
+                }
+
+                const isDirectory = (type & vscode.FileType.Directory) !== 0;
+                const childRelativePath = relativePath ? `${relativePath}/${name}` : name;
+                const childUri = vscode.Uri.joinPath(uri, name);
+
+                if (treeLines.length < DIRECTORY_CONTEXT_MAX_TREE_ENTRIES) {
+                    treeLines.push(`${'  '.repeat(depth)}${name}${isDirectory ? '/' : ''}`);
+                } else {
+                    treeTruncated = true;
+                }
+
+                if (isDirectory) {
+                    if (depth + 1 < DIRECTORY_CONTEXT_MAX_DEPTH) {
+                        await visit(childUri, childRelativePath, depth + 1);
+                    } else {
+                        omittedEntries++;
+                    }
+                    continue;
+                }
+
+                if (contentFiles.length < DIRECTORY_CONTEXT_MAX_FILES) {
+                    contentFiles.push({ uri: childUri, relativePath: childRelativePath });
+                } else {
+                    omittedEntries++;
+                }
+            }
+        };
+
+        await visit(rootUri, '', 0);
+
+        const notes: string[] = [];
+        if (treeTruncated) {
+            notes.push(`[tree truncated after ${DIRECTORY_CONTEXT_MAX_TREE_ENTRIES} entries]`);
+        }
+        if (omittedEntries > 0) {
+            notes.push(`[${omittedEntries} entries omitted by limits or excludes]`);
+        }
+
+        let treeText = treeLines.length > 0 ? treeLines.join('\n') : '[empty or unreadable]';
+        if (notes.length > 0) {
+            treeText += `\n${notes.join('\n')}`;
+        }
+
+        let charCount = treeText.length;
+        if (charCount > remainingChars) {
+            treeText = `${treeText.slice(0, Math.max(0, remainingChars))}\n[truncated after reaching total context limit of ${FILE_CONTEXT_MAX_TOTAL_CHARS} chars]`;
+            charCount = remainingChars;
+        }
+
+        const rootName = file.absolutePath;
+        const sections = [
+            `<directory name="${this._escapeXmlAttribute(rootName)}">`,
+            `<tree>\n${treeText}\n</tree>`,
+        ];
+
+        for (const entry of contentFiles) {
+            const remaining = remainingChars - charCount;
+            if (remaining <= 0) {
+                sections.push(`<attachments-note>Additional directory files were omitted after reaching the total context limit.</attachments-note>`);
+                break;
+            }
+
+            const entryPath = path.join(rootName, entry.relativePath);
+            try {
+                const bytes = await vscode.workspace.fs.readFile(entry.uri);
+                let content = new TextDecoder().decode(bytes);
+                let note = '';
+                if (content.length > FILE_CONTEXT_MAX_CHARS_PER_FILE) {
+                    content = content.slice(0, FILE_CONTEXT_MAX_CHARS_PER_FILE);
+                    note = `\n[truncated after ${FILE_CONTEXT_MAX_CHARS_PER_FILE} chars]`;
+                }
+
+                if (content.length > remaining) {
+                    content = content.slice(0, remaining);
+                    note = `\n[truncated after reaching total context limit of ${FILE_CONTEXT_MAX_TOTAL_CHARS} chars]`;
+                }
+
+                charCount += content.length;
+                sections.push(`<file name="${this._escapeXmlAttribute(entryPath)}">\n${content}${note}\n</file>`);
+            } catch {
+                sections.push(`<file name="${this._escapeXmlAttribute(entryPath)}">\n[unreadable or missing at send time]\n</file>`);
+            }
+        }
+
+        sections.push('</directory>');
+        return { section: sections.join('\n\n'), charCount };
     }
 
     private _insertFileMarkers(text: string, files: FileReferenceInfo[]): string {

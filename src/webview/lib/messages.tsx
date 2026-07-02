@@ -200,6 +200,7 @@ export function extractFileReferences(fileBlock: string, pattern: RegExp): FileR
       : fileName;
 
     files.push({
+      kind: 'file',
       relativePath: path,
       absolutePath: isAbsolutePath(path) ? path : undefined,
       displayName,

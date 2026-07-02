@@ -20,6 +20,7 @@ export function getComposerPayload(input: HTMLElement | null): ComposerPayload {
     seen.add(dedupeKey);
     const rawOffset = file.insertOffset ?? 0;
     files.push({
+      kind: file.kind,
       relativePath: file.relativePath,
       absolutePath: file.absolutePath,
       displayName: file.displayName,
@@ -57,6 +58,7 @@ export function readComposerContent(root: Node): ComposerContent {
   const walk = (node: Node): void => {
     if (isComposerFileChip(node)) {
       files.push({
+        kind: node.dataset.fileKind === 'directory' ? 'directory' : 'file',
         relativePath: node.dataset.filePath ?? '',
         absolutePath: node.dataset.absolutePath,
         displayName: node.dataset.fileName ?? node.dataset.filePath ?? '',
@@ -281,6 +283,7 @@ export function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
   const chip = document.createElement('span');
   chip.className = 'attachment-chip attachment-chip-file attachment-chip-inline';
   chip.contentEditable = 'false';
+  chip.dataset.fileKind = file.kind ?? 'file';
   chip.dataset.filePath = file.relativePath;
   if (file.absolutePath) {
     chip.dataset.absolutePath = file.absolutePath;
@@ -297,7 +300,7 @@ export function createComposerFileChip(file: FileReferenceInfo): HTMLElement {
   }
   chip.title = file.relativePath;
   chip.innerHTML = `
-        <span class="attachment-file-icon">@</span>
+        <span class="attachment-file-icon">${file.kind === 'directory' ? '/' : '@'}</span>
         <span class="attachment-chip-name">${escHtml(file.displayName)}</span>
         <button class="attachment-chip-remove" type="button" title="Remove">&times;</button>
     `;
@@ -388,6 +391,7 @@ export function readChipFileReferences(root: ParentNode): FileReferenceInfo[] {
     seen.add(dedupeKey);
 
     files.push({
+      kind: element.dataset.fileKind === 'directory' ? 'directory' : 'file',
       relativePath,
       absolutePath,
       displayName: element.dataset.fileName ?? relativePath,

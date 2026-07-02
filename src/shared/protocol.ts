@@ -154,6 +154,7 @@ export interface SessionInfo {
 }
 
 export interface FileReferenceInfo {
+    kind?: 'file' | 'directory';
     relativePath: string;
     absolutePath?: string;
     displayName: string;
