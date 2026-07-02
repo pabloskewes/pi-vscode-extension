@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { PiSessionManager } from '../pi/session';
 import { buildInlineFileMarker } from '../shared/file-markers';
-import type { ClientMessage, CompletionSound, EditorSelectionInfo, FileReferenceInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
+import type { ClientMessage, CompletionSound, EditorSelectionInfo, FileReferenceInfo, ModeInfo, ResolvedFileReference, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
 import { UsageBridge } from './usage-bridge';
@@ -40,6 +42,84 @@ interface EditorSelectionContext extends EditorSelectionInfo {
     promptPath: string;
 }
 
+interface ModeConfig {
+    label?: string;
+    description?: string;
+    readOnly?: boolean;
+}
+
+interface ModesConfig {
+    defaultMode: string;
+    modes: Record<string, ModeConfig>;
+}
+
+const MODES_CONFIG_DIR = '.pi/extensions/pi-modes';
+const GLOBAL_MODES_CONFIG_PATH = path.join(os.homedir(), '.pi/agent/extensions/pi-modes/config.json');
+
+function loadModesConfig(cwd: string): ModesConfig {
+    const defaults: ModesConfig = {
+        defaultMode: 'build',
+        modes: {
+            build: {
+                label: 'Build',
+                description: 'Default implementation mode.',
+                readOnly: false,
+            },
+            plan: {
+                label: 'Plan',
+                description: 'Read-only planning mode.',
+                readOnly: true,
+            },
+        },
+    };
+
+    const readJson = (filePath: string): Partial<ModesConfig> | undefined => {
+        try {
+            if (!fs.existsSync(filePath)) return undefined;
+            const raw = fs.readFileSync(filePath, 'utf8');
+            const parsed = JSON.parse(raw) as unknown;
+            if (typeof parsed !== 'object' || parsed === null) return undefined;
+            return parsed as Partial<ModesConfig>;
+        } catch {
+            return undefined;
+        }
+    };
+
+    const globalConfig = readJson(GLOBAL_MODES_CONFIG_PATH);
+    const projectConfig = readJson(path.join(cwd, MODES_CONFIG_DIR, 'config.json'));
+
+    const mergedModes: Record<string, ModeConfig> = { ...defaults.modes };
+    if (globalConfig?.modes) {
+        Object.assign(mergedModes, globalConfig.modes);
+    }
+    if (projectConfig?.modes) {
+        Object.assign(mergedModes, projectConfig.modes);
+    }
+
+    const defaultMode =
+        projectConfig?.defaultMode ??
+        globalConfig?.defaultMode ??
+        defaults.defaultMode;
+
+    return { defaultMode, modes: mergedModes };
+}
+
+function isModesInstalled(cwd: string): boolean {
+    return (
+        fs.existsSync(GLOBAL_MODES_CONFIG_PATH) ||
+        fs.existsSync(path.join(cwd, MODES_CONFIG_DIR, 'config.json'))
+    );
+}
+
+function modesToInfos(config: ModesConfig): ModeInfo[] {
+    return Object.entries(config.modes).map(([name, mode]) => ({
+        name,
+        label: mode.label,
+        description: mode.description,
+        readOnly: mode.readOnly,
+    }));
+}
+
 interface TabState {
     id: string;
     name: string;
@@ -63,6 +143,7 @@ interface TabState {
     pendingEditorSelections: Map<string, EditorSelectionContext>;
     pendingEditorSelectionDeliveries: Set<string>;
     namingInProgress: boolean;
+    currentMode?: string;
 }
 
 let tabIdCounter = 0;
@@ -75,7 +156,9 @@ function makeTabState(
     session: PiSessionManager,
     diffManager: DiffManager,
     checkpointManager: CheckpointManager,
+    cwd: string,
 ): TabState {
+    const config = loadModesConfig(cwd);
     return {
         id,
         name: 'New Agent',
@@ -99,6 +182,7 @@ function makeTabState(
         pendingEditorSelections: new Map(),
         pendingEditorSelectionDeliveries: new Set(),
         namingInProgress: false,
+        currentMode: config.defaultMode,
     };
 }
 
@@ -138,7 +222,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._tabSubscriptions.set('__config', [() => configListener.dispose()]);
 
         const id = nextTabId();
-        const tab = makeTabState(id, initialSession, initialDiffManager, initialCheckpointManager);
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const tab = makeTabState(id, initialSession, initialDiffManager, initialCheckpointManager, cwd);
         this._tabs.set(id, tab);
         this._activeTabId = id;
         this._subscribeTab(tab);
@@ -666,6 +751,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'getSkills': {
                     const skills = tab.session.getSkills();
                     this._post({ type: 'skills', skills });
+                    break;
+                }
+                case 'getModes': {
+                    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+                    const config = loadModesConfig(cwd);
+                    const installed = isModesInstalled(cwd);
+                    this._post({
+                        type: 'modes',
+                        modes: modesToInfos(config),
+                        current: tab.currentMode ?? config.defaultMode,
+                        installed,
+                    });
+                    break;
+                }
+                case 'setMode': {
+                    const mode = msg.mode.trim();
+                    if (!mode) break;
+                    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+                    const config = loadModesConfig(cwd);
+                    if (!Object.prototype.hasOwnProperty.call(config.modes, mode)) {
+                        this._post({ type: 'error', message: `Unknown mode '${mode}'.` });
+                        break;
+                    }
+                    tab.currentMode = mode;
+                    await tab.session.prompt(`/mode ${mode}`);
+                    const updatedConfig = loadModesConfig(cwd);
+                    this._post({
+                        type: 'modes',
+                        modes: modesToInfos(updatedConfig),
+                        current: tab.currentMode,
+                        installed: isModesInstalled(cwd),
+                    });
                     break;
                 }
                 case 'searchFiles': {
@@ -1337,7 +1454,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const newDiff = new DiffManager(newSession, newCheckpoint);
 
         const id = nextTabId();
-        const tab = makeTabState(id, newSession, newDiff, newCheckpoint);
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const tab = makeTabState(id, newSession, newDiff, newCheckpoint, cwd);
         this._tabs.set(id, tab);
         this._subscribeTab(tab);
 

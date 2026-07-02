@@ -2,6 +2,7 @@ import type {
   CompletionSound,
   FileChangeInfo,
   FileReferenceInfo,
+  ModeInfo,
   ModelInfo,
   SkillInfo,
   TabInfo,
@@ -32,6 +33,8 @@ export interface WebviewState {
   queuedMessages: string[];
   pendingImages: Array<{ dataUrl: string; name: string }>;
   completionSound: CompletionSound;
+  modes?: ModeInfo[];
+  currentMode?: string;
 }
 
 export interface ContextUsageInfo {

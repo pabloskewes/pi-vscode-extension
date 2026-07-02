@@ -87,6 +87,19 @@ export interface SkillInfo {
     disableModelInvocation: boolean;
 }
 
+export interface ModeInfo {
+    name: string;
+    label?: string;
+    description?: string;
+    readOnly?: boolean;
+}
+
+export interface ModesState {
+    available: ModeInfo[];
+    current?: string;
+    installed: boolean;
+}
+
 export interface UsageWindowDTO {
     key: string;
     label: string;
@@ -226,6 +239,8 @@ export type ClientMessage =
     | { type: 'switchTab'; tabId: string }
     | { type: 'openSettings' }
     | { type: 'getSkills' }
+    | { type: 'getModes' }
+    | { type: 'setMode'; mode: string }
     | { type: 'searchFiles'; query: string }
     | { type: 'resolveFileReferences'; requestId: string; tokens: string[] }
     | { type: 'resolveDroppedFiles'; requestId: string; paths: string[] }
@@ -262,6 +277,7 @@ export type ServerMessage =
     | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'modes'; modes: ModeInfo[]; current?: string; installed: boolean }
     | { type: 'fileSuggestions'; query: string; items: FileReferenceInfo[] }
     | { type: 'resolvedFileReferences'; requestId: string; items: ResolvedFileReference[] }
     | { type: 'resolvedDroppedFiles'; requestId: string; items: ResolvedFileReference[] }

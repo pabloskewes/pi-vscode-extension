@@ -70,6 +70,7 @@ interface ComposerProps {
   onModelSearchChange: (value: string) => void;
   onSelectModel: (provider: string, modelId: string) => void;
   onSetThinkingLevel: (level: string) => void;
+  onModeChange: (mode: string) => void;
   onToggleUsagePopover: () => void;
   onCloseUsagePopover: () => void;
   onRefreshUsage: () => void;
@@ -126,6 +127,7 @@ export default function Composer({
   onModelSearchChange,
   onSelectModel,
   onSetThinkingLevel,
+  onModeChange,
   onToggleUsagePopover,
   onCloseUsagePopover,
   onRefreshUsage,
@@ -254,6 +256,8 @@ export default function Composer({
 
       <Footer
         model={state.model}
+        modes={state.modes ?? []}
+        currentMode={state.currentMode}
         isStreaming={state.isStreaming}
         usage={usage}
         usagePopoverOpen={usagePopoverOpen}
@@ -263,6 +267,7 @@ export default function Composer({
         onToggleUsagePopover={onToggleUsagePopover}
         onCloseUsagePopover={onCloseUsagePopover}
         onRefreshUsage={onRefreshUsage}
+        onModeChange={onModeChange}
         onAbort={onAbort}
         onSteer={onSteer}
         onSend={onSend}

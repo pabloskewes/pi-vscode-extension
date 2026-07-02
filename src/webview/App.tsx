@@ -945,6 +945,11 @@ export default function App(): ReactNode {
     setState((previous) => ({ ...previous, thinkingLevel: level }));
   };
 
+  const handleModeChange = (mode: string): void => {
+    vscode.postMessage({ type: 'setMode', mode });
+    setState((previous) => ({ ...previous, currentMode: mode }));
+  };
+
   const handleToggleModelPicker = (): void => {
     if (modelPickerOpen) {
       setModelPickerOpen(false);
@@ -1012,6 +1017,7 @@ export default function App(): ReactNode {
     // Request the same data proactively on mount as a fallback.
     vscode.postMessage({ type: 'getState' });
     vscode.postMessage({ type: 'getSkills' });
+    vscode.postMessage({ type: 'getModes' });
     vscode.postMessage({ type: 'requestUsage' });
     vscode.postMessage({ type: 'getSessionsSnapshot' });
   }, []);
@@ -1047,6 +1053,7 @@ export default function App(): ReactNode {
         case 'ready':
           vscode.postMessage({ type: 'getState' });
           vscode.postMessage({ type: 'getSkills' });
+          vscode.postMessage({ type: 'getModes' });
           vscode.postMessage({ type: 'requestUsage' });
           vscode.postMessage({ type: 'getSessionsSnapshot' });
           break;
@@ -1169,6 +1176,14 @@ export default function App(): ReactNode {
 
         case 'skills':
           setState((previous) => ({ ...previous, skills: message.skills }));
+          break;
+
+        case 'modes':
+          setState((previous) => ({
+            ...previous,
+            modes: message.modes,
+            currentMode: message.current ?? previous.currentMode,
+          }));
           break;
 
         case 'fileSuggestions':
@@ -1524,6 +1539,7 @@ export default function App(): ReactNode {
         onModelSearchChange={setModelSearch}
         onSelectModel={handleSelectModel}
         onSetThinkingLevel={handleSetThinkingLevel}
+        onModeChange={handleModeChange}
         onToggleUsagePopover={() => setUsagePopoverOpen((previous) => !previous)}
         onCloseUsagePopover={() => setUsagePopoverOpen(false)}
         onRefreshUsage={() => vscode.postMessage({ type: 'refreshUsage' })}
