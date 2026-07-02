@@ -23,8 +23,6 @@ import type { FileMenuState, SlashMenuState, WebviewState } from '../../types';
 
 interface ComposerProps {
   state: WebviewState;
-  usage?: UsageSnapshotDTO;
-  usagePopoverOpen: boolean;
   changedFilesOpen: boolean;
   composerDragOver: boolean;
   fileMenuState: FileMenuState;
@@ -71,9 +69,6 @@ interface ComposerProps {
   onSelectModel: (provider: string, modelId: string) => void;
   onSetThinkingLevel: (level: string) => void;
   onModeChange: (mode: string) => void;
-  onToggleUsagePopover: () => void;
-  onCloseUsagePopover: () => void;
-  onRefreshUsage: () => void;
   onAbort: () => void;
   onSteer: () => void;
   onSend: () => void;
@@ -81,8 +76,6 @@ interface ComposerProps {
 
 export default function Composer({
   state,
-  usage,
-  usagePopoverOpen,
   changedFilesOpen,
   composerDragOver,
   fileMenuState,
@@ -128,9 +121,6 @@ export default function Composer({
   onSelectModel,
   onSetThinkingLevel,
   onModeChange,
-  onToggleUsagePopover,
-  onCloseUsagePopover,
-  onRefreshUsage,
   onAbort,
   onSteer,
   onSend,
@@ -259,14 +249,9 @@ export default function Composer({
         modes={state.modes ?? []}
         currentMode={state.currentMode}
         isStreaming={state.isStreaming}
-        usage={usage}
-        usagePopoverOpen={usagePopoverOpen}
         contextUsage={state.contextUsage}
         footerModelRef={footerModelRef}
         onToggleModelPicker={onToggleModelPicker}
-        onToggleUsagePopover={onToggleUsagePopover}
-        onCloseUsagePopover={onCloseUsagePopover}
-        onRefreshUsage={onRefreshUsage}
         onModeChange={onModeChange}
         onAbort={onAbort}
         onSteer={onSteer}

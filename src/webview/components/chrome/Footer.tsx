@@ -1,8 +1,7 @@
 import type { MutableRefObject, ReactNode } from 'react';
-import type { ModeInfo, ModelInfo, UsageSnapshotDTO } from '../../../shared/protocol';
+import type { ModeInfo, ModelInfo } from '../../../shared/protocol';
 import { iconsBaseUri } from '../../vscode-api';
 import ContextUsage from '../messages/ContextUsage';
-import { UsageWidget } from '../../usage';
 import ModeSelector from '../menus/ModeSelector';
 
 interface FooterProps {
@@ -10,14 +9,9 @@ interface FooterProps {
   modes: ModeInfo[];
   currentMode?: string;
   isStreaming: boolean;
-  usage?: UsageSnapshotDTO;
-  usagePopoverOpen: boolean;
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   footerModelRef: MutableRefObject<HTMLSpanElement | null>;
   onToggleModelPicker: () => void;
-  onToggleUsagePopover: () => void;
-  onCloseUsagePopover: () => void;
-  onRefreshUsage: () => void;
   onModeChange: (mode: string) => void;
   onAbort: () => void;
   onSteer: () => void;
@@ -29,14 +23,9 @@ export default function Footer({
   modes,
   currentMode,
   isStreaming,
-  usage,
-  usagePopoverOpen,
   contextUsage,
   footerModelRef,
   onToggleModelPicker,
-  onToggleUsagePopover,
-  onCloseUsagePopover,
-  onRefreshUsage,
   onModeChange,
   onAbort,
   onSteer,
@@ -48,13 +37,6 @@ export default function Footer({
       <span className="footer-model" ref={footerModelRef} onClick={onToggleModelPicker}>
         {model?.name ?? model?.id ?? ''}
       </span>
-      <UsageWidget
-        usage={usage}
-        open={usagePopoverOpen}
-        onToggle={onToggleUsagePopover}
-        onClose={onCloseUsagePopover}
-        onRefresh={onRefreshUsage}
-      />
       <ContextUsage contextUsage={contextUsage} />
       {isStreaming ? (
         <button

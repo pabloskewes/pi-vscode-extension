@@ -23,6 +23,7 @@ import Composer from './components/chrome/Composer';
 import Header from './components/chrome/Header';
 import ImageLightbox from './components/chrome/ImageLightbox';
 import ScrollBottomButton from './components/chrome/ScrollBottomButton';
+import UsageStatusBar from './components/chrome/UsageStatusBar';
 import Messages from './components/messages/Messages';
 import SessionPanel from './components/panels/SessionPanel';
 import { useLatestRef } from './hooks/useLatestRef';
@@ -1483,8 +1484,6 @@ export default function App(): ReactNode {
 
       <Composer
         state={state}
-        usage={usage}
-        usagePopoverOpen={usagePopoverOpen}
         changedFilesOpen={changedFilesOpen}
         composerDragOver={composerDragOver}
         fileMenuState={fileMenuState}
@@ -1540,12 +1539,17 @@ export default function App(): ReactNode {
         onSelectModel={handleSelectModel}
         onSetThinkingLevel={handleSetThinkingLevel}
         onModeChange={handleModeChange}
-        onToggleUsagePopover={() => setUsagePopoverOpen((previous) => !previous)}
-        onCloseUsagePopover={() => setUsagePopoverOpen(false)}
-        onRefreshUsage={() => vscode.postMessage({ type: 'refreshUsage' })}
         onAbort={() => vscode.postMessage({ type: 'abort' })}
         onSteer={handleSteerButton}
         onSend={handleSendButton}
+      />
+
+      <UsageStatusBar
+        usage={usage}
+        popoverOpen={usagePopoverOpen}
+        onTogglePopover={() => setUsagePopoverOpen((previous) => !previous)}
+        onClosePopover={() => setUsagePopoverOpen(false)}
+        onRefresh={() => vscode.postMessage({ type: 'refreshUsage' })}
       />
 
       <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc('')} />
